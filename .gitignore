@@ -1,0 +1,8 @@
+build/
+*.o
+*.a
+*.so
+*.dylib
+.DS_Store
+*.log
+JAVASCRIPT_PATTERN_COMPLIANCE.md

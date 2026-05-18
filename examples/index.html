@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C SDK Examples - OddSockets</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <style>
+        :root {
+            --color-bg: #fafafa;
+            --color-surface: #ffffff;
+            --color-border: #e5e7eb;
+            --color-text-primary: #111827;
+            --color-text-secondary: #6b7280;
+            --color-text-muted: #9ca3af;
+            --color-accent: #3b82f6;
+            --color-accent-light: #dbeafe;
+            --color-success: #10b981;
+            --color-warning: #f59e0b;
+            --spacing-xs: 0.25rem;
+            --spacing-sm: 0.5rem;
+            --spacing-md: 1rem;
+            --spacing-lg: 1.5rem;
+            --spacing-xl: 2rem;
+            --spacing-2xl: 3rem;
+            --border-radius: 8px;
+            --font-mono: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--color-text-primary);
+            background: var(--color-bg);
+            font-size: 16px;
+            overflow-x: hidden;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: var(--spacing-xl) var(--spacing-md);
+        }
+
+        .topheader {
+            text-align: center;
+            margin-bottom: 0.15rem;
+        }
+
+        .topheader h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #1a202c;
+            margin-bottom: 0.15rem;
+        }
+
+        .topheader p {
+            font-size: 1.125rem;
+            color: #718096;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .logo {
+            padding-top: 5px;
+            padding-left: 25px;
+            font-size: 1.375rem;
+            font-weight: 600;
+            margin-bottom: 0.1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo i {
+            font-size: 1.75rem;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 2rem 0;
+            border-top: 1px solid #e2e8f0;
+            color: #718096;
+            font-size: 0.875rem;
+        }
+        
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            color: var(--color-accent);
+            text-decoration: none;
+            font-weight: 500;
+            padding-top: 10px;
+            margin-bottom: 0px;
+            transition: color 0.2s ease;
+        }
+
+        .back-link:hover {
+            color: #2563eb;
+        }
+
+        .back-link i {
+            margin-right: var(--spacing-sm);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: var(--spacing-2xl);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--color-text-primary);
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .header p {
+            font-size: 1.125rem;
+            color: var(--color-text-secondary);
+            max-width: 600px;
+            margin: 0 auto var(--spacing-lg);
+        }
+
+        .demo-button {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            background: var(--color-accent);
+            color: white;
+            text-decoration: none;
+            padding: var(--spacing-md) var(--spacing-xl);
+            border-radius: var(--border-radius);
+            font-weight: 500;
+            font-size: 1rem;
+            transition: background-color 0.2s ease;
+        }
+
+        .demo-button:hover {
+            background: #2563eb;
+        }
+
+        /* BULLETPROOF FLEXBOX LAYOUT */
+        .examples-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--spacing-xl);
+            margin-bottom: var(--spacing-2xl);
+        }
+
+        .example-card {
+            flex: 1 1 100%;
+            min-width: 0;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            padding: var(--spacing-xl);
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 2 columns on larger screens */
+        @media (min-width: 768px) {
+            .example-card {
+                flex: 1 1 calc(50% - var(--spacing-xl) / 2);
+                max-width: calc(50% - var(--spacing-xl) / 2);
+            }
+        }
+
+        /* Single column on mobile */
+        @media (max-width: 767px) {
+            .example-card {
+                flex: 1 1 100%;
+                max-width: 100%;
+            }
+        }
+
+        .example-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .example-header {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            margin-bottom: var(--spacing-md);
+            flex-wrap: wrap;
+        }
+
+        .example-icon {
+            width: 24px;
+            height: 24px;
+            color: var(--color-accent);
+            flex-shrink: 0;
+        }
+
+        .example-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--color-text-primary);
+            flex-grow: 1;
+        }
+
+        .example-status {
+            padding: var(--spacing-xs) var(--spacing-sm);
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            flex-shrink: 0;
+        }
+
+        .status-available {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .status-coming-soon {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .example-description {
+            color: var(--color-text-secondary);
+            margin-bottom: var(--spacing-lg);
+            font-size: 0.875rem;
+            flex-grow: 1;
+        }
+
+        .code-block {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: var(--spacing-lg);
+            border-radius: var(--border-radius);
+            font-family: var(--font-mono);
+            font-size: 0.875rem;
+            line-height: 1.5;
+            overflow-x: auto;
+            margin-bottom: var(--spacing-lg);
+            border: 1px solid #334155;
+            width: 100%;
+        }
+
+        .code-block::-webkit-scrollbar {
+            height: 6px;
+        }
+
+        .code-block::-webkit-scrollbar-track {
+            background: #334155;
+        }
+
+        .code-block::-webkit-scrollbar-thumb {
+            background: #64748b;
+            border-radius: 3px;
+        }
+
+        .example-actions {
+            display: flex;
+            gap: var(--spacing-sm);
+            flex-wrap: wrap;
+            margin-top: auto;
+        }
+
+        .btn {
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--border-radius);
+            text-decoration: none;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+            flex: 1;
+            justify-content: center;
+            min-width: 0;
+        }
+
+        .btn-primary {
+            background: var(--color-accent);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #2563eb;
+        }
+
+        .btn-secondary {
+            background: var(--color-surface);
+            color: var(--color-text-secondary);
+            border: 1px solid var(--color-border);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: var(--color-bg);
+            color: var(--color-text-primary);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Mobile Responsive Design */
+        @media (max-width: 767px) {
+            .container {
+                padding: var(--spacing-lg) var(--spacing-sm);
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .header p {
+                font-size: 1rem;
+            }
+
+            .examples-container {
+                gap: var(--spacing-lg);
+            }
+
+            .example-card {
+                padding: var(--spacing-lg);
+            }
+
+            .example-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: var(--spacing-sm);
+            }
+
+            .example-status {
+                align-self: flex-end;
+            }
+
+            .example-actions {
+                flex-direction: column;
+            }
+
+            .btn {
+                flex: none;
+                width: 100%;
+            }
+        }
+
+        /* Very small screens */
+        @media (max-width: 480px) {
+            .container {
+                padding: var(--spacing-md) var(--spacing-xs);
+            }
+
+            .header h1 {
+                font-size: 1.75rem;
+            }
+
+            .example-card {
+                padding: var(--spacing-md);
+            }
+
+            .code-block {
+                padding: var(--spacing-md);
+                font-size: 0.8125rem;
+            }
+
+            .demo-button {
+                padding: var(--spacing-sm) var(--spacing-lg);
+                font-size: 0.875rem;
+            }
+        }
+
+        /* Prism Theme Override */
+        pre[class*="language-"] {
+            background: #1e293b !important;
+            color: #e2e8f0 !important;
+            margin: 0;
+            border-radius: var(--border-radius);
+            overflow-x: auto;
+        }
+
+        .token.comment { color: #64748b !important; }
+        .token.string { color: #22d3ee !important; }
+        .token.keyword { color: #a78bfa !important; }
+        .token.function { color: #fb7185 !important; }
+        .token.number { color: #fbbf24 !important; }
+        .token.operator { color: #e2e8f0 !important; }
+
+        /* Ensure no horizontal overflow */
+        .example-card,
+        .code-block,
+        .example-actions,
+        .btn {
+            max-width: 100%;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <div class="topheader">
+            <div class="logo">
+                <a href="/">
+                     <img src="https://prodmedia.tyga.host/public/tyga.cloud/landing/oddsockets.com/oddsockets-logo-words-white-256.png" alt="OddSockets" class="logo">
+                </a>  
+            </div>
+        </div>
+
+        <a href="../docs/index.html" class="back-link">
+            <i class="fas fa-arrow-left"></i>
+            Back to Documentation
+        </a>
+        
+        <div class="header">
+            <h1>C SDK Examples</h1>
+            <p>Real-world examples showing how to use the OddSockets C SDK in embedded systems, IoT devices, and resource-constrained environments</p>
+            <a href="basic_usage.c" class="demo-button" download>
+                <i class="fas fa-download"></i>
+                Download Basic Example
+            </a>
+        </div>
+
+        <div class="examples-container">
+            <!-- Basic Usage Example -->
+            <div class="example-card">
+                <div class="example-header">
+                    <i class="fas fa-rocket example-icon"></i>
+                    <div class="example-title">Basic Usage</div>
+                    <span class="example-status status-available">Available</span>
+                </div>
+                <div class="example-description">
+                    Simple example showing how to connect, subscribe to a channel, and publish messages using the core C SDK functionality.
+                </div>
+                <div class="code-block">
+                    <pre><code class="language-c">#include "oddsockets.h"
+
+int main() {
+    // Initialize configuration
+    oddsockets_config_t config;
+    oddsockets_config_init(&config, "ak_live_1234567890abcdef");
+    
+    // Create client
+    oddsockets_client_t* client = oddsockets_create(&config);
+    
+    // Connect and create channel
+    oddsockets_connect(client);
+    oddsockets_channel_t* channel = oddsockets_channel_create(client, "my-channel");
+    
+    // Subscribe and publish
+    oddsockets_channel_subscribe(channel, on_message, NULL, NULL);
+    oddsockets_channel_publish(channel, "Hello from C SDK!", NULL);
+    
+    // Event loop
+    while (oddsockets_get_state(client) == ODDSOCKETS_STATE_CONNECTED) {
+        oddsockets_process_events(client);
+        usleep(10000); // 10ms
+    }
+    
+    // Cleanup
+    oddsockets_channel_destroy(channel);
+    oddsockets_destroy(client);
+    return 0;
+}</code></pre>
+                </div>
+                <div class="example-actions">
+                    <a href="basic_usage.c" class="btn btn-primary" download>
+                        <i class="fas fa-download"></i>
+                        Download Source
+                    </a>
+                    <a href="../README.md" class="btn btn-secondary">
+                        <i class="fas fa-book"></i>
+                        View Docs
+                    </a>
+                </div>
+            </div>
+
+            <!-- FreeRTOS Integration Example -->
+            <div class="example-card">
+                <div class="example-header">
+                    <i class="fas fa-microchip example-icon"></i>
+                    <div class="example-title">FreeRTOS Integration</div>
+                    <span class="example-status status-available">Available</span>
+                </div>
+                <div class="example-description">
+                    Complete example showing how to integrate OddSockets with FreeRTOS, including task creation and memory management.
+                </div>
+                <div class="code-block">
+                    <pre><code class="language-c">#include "FreeRTOS.h"
+#include "task.h"
+#include "oddsockets.h"
+
+void oddsockets_task(void *pvParameters) {
+    oddsockets_config_t config;
+    oddsockets_config_init(&config, "your-api-key");
+    
+    // Use FreeRTOS heap
+    oddsockets_set_memory_functions(pvPortMalloc, vPortFree, pvPortRealloc);
+    
+    oddsockets_client_t* client = oddsockets_create(&config);
+    oddsockets_connect(client);
+    
+    oddsockets_channel_t* channel = oddsockets_channel_create(client, "freertos-channel");
+    oddsockets_channel_subscribe(channel, on_message, NULL, NULL);
+    
+    while (1) {
+        oddsockets_process_events(client);
+        vTaskDelay(pdMS_TO_TICKS(10)); // 10ms delay
+    }
+}
+
+void app_main() {
+    xTaskCreate(oddsockets_task, "oddsockets", 4096, NULL, 5, NULL);
+}</code></pre>
+                </div>
+                <div class="example-actions">
+                    <a href="#" class="btn btn-primary" disabled>
+                        <i class="fas fa-download"></i>
+                        Coming Soon
+                    </a>
+                    <a href="../docs/index.html#embedded" class="btn btn-secondary">
+                        <i class="fas fa-book"></i>
+                        View Guide
+                    </a>
+                </div>
+            </div>
+
+            <!-- Arduino/ESP32 Example -->
+            <div class="example-card">
+                <div class="example-header">
+                    <i class="fas fa-wifi example-icon"></i>
+                    <div class="example-title">Arduino/ESP32</div>
+                    <span class="example-status status-available">Available</span>
+                </div>
+                <div class="example-description">
+                    Arduino sketch demonstrating OddSockets integration with ESP32, including WiFi connection and IoT messaging.
+                </div>
+                <div class="code-block">
+                    <pre><code class="language-c">#include <WiFi.h>
+#include "oddsockets.h"
+
+const char* ssid = "your-wifi";
+const char* password = "your-password";
+
+oddsockets_client_t* client;
+
+void setup() {
+    Serial.begin(115200);
+    
+    // Connect to WiFi
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(1000);
+        Serial.println("Connecting to WiFi...");
+    }
+    
+    // Initialize OddSockets
+    oddsockets_config_t config;
+    oddsockets_config_init(&config, "your-api-key");
+    client = oddsockets_create(&config);
+    
+    oddsockets_connect(client);
+    
+    // Create sensor data channel
+    oddsockets_channel_t* channel = oddsockets_channel_create(client, "sensor-data");
+    oddsockets_channel_subscribe(channel, on_message, NULL, NULL);
+}
+
+void loop() {
+    oddsockets_process_events(client);
+    
+    // Send sensor data every 5 seconds
+    static unsigned long lastSend = 0;
+    if (millis() - lastSend > 5000) {
+        char data[64];
+        snprintf(data, sizeof(data), "{\"temperature\":%.1f,\"humidity\":%.1f}", 
+                 25.5, 60.2);
+        
+        oddsockets_channel_t* channel = oddsockets_channel_create(client, "sensor-data");
+        oddsockets_channel_publish(channel, data, NULL);
+        lastSend = millis();
+    }
+    
+    delay(10);
+}</code></pre>
+                </div>
+                <div class="example-actions">
+                    <a href="#" class="btn btn-primary" disabled>
+                        <i class="fas fa-download"></i>
+                        Coming Soon
+                    </a>
+                    <a href="../docs/index.html#embedded" class="btn btn-secondary">
+                        <i class="fas fa-book"></i>
+                        View Guide
+                    </a>
+                </div>
+            </div>
+
+            <!-- Static Memory Allocation Example -->
+            <div class="example-card">
+                <div class="example-header">
+                    <i class="fas fa-memory example-icon"></i>
+                    <div class="example-title">Static Memory Allocation</div>
+                    <span class="example-status status-available">Available</span>
+                </div>
+                <div class="example-description">
+                    Example showing deterministic memory usage with pre-allocated memory pools for real-time and safety-critical systems.
+                </div>
+                <div class="code-block">
+                    <pre><code class="language-c">// Enable static allocation at compile time
+#define ODDSOCKETS_ENABLE_STATIC_ALLOCATION
+
+// Pre-allocated memory pools
+static uint8_t client_memory[ODDSOCKETS_CLIENT_SIZE];
+static uint8_t channel_memory[ODDSOCKETS_MAX_CHANNELS][ODDSOCKETS_CHANNEL_SIZE];
+static uint8_t message_buffer[ODDSOCKETS_MAX_MESSAGE_SIZE];
+
+// Memory pool management
+static size_t memory_pool_used = 0;
+static uint8_t memory_pool[8192]; // 8KB pool
+
+void* embedded_malloc(size_t size) {
+    if (memory_pool_used + size > sizeof(memory_pool)) {
+        return NULL; // Out of memory
+    }
+    
+    void* ptr = &memory_pool[memory_pool_used];
+    memory_pool_used += size;
+    return ptr;
+}
+
+void embedded_free(void* ptr) {
+    // Simple pool allocator - no individual free
+    // Reset entire pool when done
+}
+
+int main() {
+    // Set custom memory functions
+    oddsockets_set_memory_functions(embedded_malloc, embedded_free, NULL);
+    
+    // Initialize with static allocation
+    oddsockets_config_t config;
+    oddsockets_config_init(&config, "your-api-key");
+    
+    oddsockets_client_t* client = oddsockets_create(&config);
+    
+    // Rest of application...
+    
+    return 0;
+}</code></pre>
+                </div>
+                <div class="example-actions">
+                    <a href="#" class="btn btn-primary" disabled>
+                        <i class="fas fa-download"></i>
+                        Coming Soon
+                    </a>
+                    <a href="../docs/index.html#embedded" class="btn btn-secondary">
+                        <i class="fas fa-book"></i>
+                        View Guide
+                    </a>
+                </div>
+            </div>
+
+            <!-- Linux Application Example -->
+            <div class="example-card">
+                <div class="example-header">
+                    <i class="fas fa-desktop example-icon"></i>
+                    <div class="example-title">Linux Application</div>
+                    <span class="example-status status-available">Available</span>
+                </div>
+                <div class="example-description">
+                    Complete Linux application example with signal handling, configuration files, and production-ready error handling.
+                </div>
+                <div class="code-block">
+                    <pre><code class="language-c">#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+#include "oddsockets.h"
+
+static volatile int running = 1;
+static oddsockets_client_t* client = NULL;
+
+void signal_handler(int sig) {
+    printf("\nReceived signal %d, shutting down...\n", sig);
+    running = 0;
+}
+
+void on_message(const char* channel_name, const char* message, void* user_data) {
+    printf("[%s] %s\n", channel_name, message);
+}
+
+void on_connection_state(oddsockets_state_t state, void* user_data) {
+    printf("Connection state: %s\n", oddsockets_state_string(state));
+}
+
+void on_error(oddsockets_error_t error, const char* message, void* user_data) {
+    fprintf(stderr, "Error %d: %s\n", error, message);
+}
+
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <api_key>\n", argv[0]);
+        return 1;
+    }
+    
+    // Set up signal handlers
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+    
+    // Initialize OddSockets
+    oddsockets_config_t config;
+    oddsockets_config_init(&config, argv[1]);
+    config.connection_callback = on_connection_state;
+    config.error_callback = on_error;
+    config.log_level = ODDSOCKETS_LOG_INFO;
+    
+    client = oddsockets_create(&config);
+    if (!client) {
+        fprintf(stderr, "Failed to create client\n");
+        return 1;
+    }
+    
+    // Connect and run
+    if (oddsockets_connect(client) != ODDSOCKETS_SUCCESS) {
+        fprintf(stderr, "Failed to connect\n");
+        oddsockets_destroy(client);
+        return 1;
+    }
+    
+    // Main event loop
+    while (running && oddsockets_get_state(client) == ODDSOCKETS_STATE_CONNECTED) {
+        oddsockets_process_events(client);
+        usleep(10000); // 10ms
+    }
+    
+    // Cleanup
+    oddsockets_destroy(client);
+    printf("Application terminated cleanly\n");
+    return 0;
+}</code></pre>
+                </div>
+                <div class="example-actions">
+                    <a href="#" class="btn btn-primary" disabled>
+                        <i class="fas fa-download"></i>
+                        Coming Soon
+                    </a>
+                    <a href="../docs/index.html" class="btn btn-secondary">
+                        <i class="fas fa-book"></i>
+                        View Docs
+                    </a>
+                </div>
+            </div>
+
+            <!-- Cross-Compilation Example -->
+            <div class="example-card">
+                <div class="example-header">
+                    <i class="fas fa-cogs example-icon"></i>
+                    <div class="example-title">Cross-Compilation</div>
+                    <span class="example-status status-available">Available</span>
+                </div>
+                <div class="example-description">
+                    CMake configuration and build scripts for cross-compiling to ARM, MIPS, and other embedded architectures.
+                </div>
+                <div class="code-block">
+                    <pre><code class="language-bash"># CMake toolchain file for ARM cross-compilation
+# arm-linux-gnueabihf.cmake
+
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR arm)
+
+# Cross-compiler settings
+set(CMAKE_C_COMPILER arm-linux-gnueabihf-gcc)
+set(CMAKE_CXX_COMPILER arm-linux-gnueabihf-g++)
+
+# Root path for cross-compilation
+set(CMAKE_FIND_ROOT_PATH /usr/arm-linux-gnueabihf)
+
+# Search for programs in the build host directories
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+
+# Search for libraries and headers in the target directories
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+
+# Build command:
+# mkdir build-arm && cd build-arm
+# cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/arm-linux-gnueabihf.cmake ..
+# make</code></pre>
+                </div>
+                <div class="example-actions">
+                    <a href="#" class="btn btn-primary" disabled>
+                        <i class="fas fa-download"></i>
+                        Coming Soon
+                    </a>
+                    <a href="../docs/index.html#installation" class="btn btn-secondary">
+                        <i class="fas fa-book"></i>
+                        View Guide
+                    </a>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>&copy; 2025 Tyga.Cloud Ltd. oddsockets.com is a division of Tyga.Cloud Ltd. All rights reserved.</p>
+    </div>
+
+    <script>
+        // Initialize Prism.js
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof Prism !== 'undefined') {
+                Prism.highlightAll();
+            }
+        });
+    </script>
+</body>
+</html>
