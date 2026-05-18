@@ -1,0 +1,1388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OddSockets C SDK Documentation</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <style>
+        :root {
+            --color-bg: #fafafa;
+            --color-surface: #ffffff;
+            --color-border: #e5e7eb;
+            --color-text-primary: #111827;
+            --color-text-secondary: #6b7280;
+            --color-text-muted: #9ca3af;
+            --color-accent: #3b82f6;
+            --color-accent-light: #dbeafe;
+            --spacing-xs: 0.25rem;
+            --spacing-sm: 0.5rem;
+            --spacing-md: 1rem;
+            --spacing-lg: 1.5rem;
+            --spacing-xl: 2rem;
+            --spacing-2xl: 3rem;
+            --border-radius: 8px;
+            --font-mono: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--color-text-primary);
+            background: var(--color-bg);
+            font-size: 16px;
+        }
+
+        /* Layout Container - Flexbox Solution */
+        .layout {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        .topheader {
+            text-align: center;
+            margin-bottom: 0.15rem;
+        }
+
+        .topheader h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #1a202c;
+            margin-bottom: 0.15rem;
+        }
+
+        .topheader p {
+            font-size: 1.125rem;
+            color: #718096;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .logo {
+            padding-top: 5px;
+            padding-left: 25px;
+            font-size: 1.375rem;
+            font-weight: 600;
+            margin-bottom: 0.1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }   
+        
+        .logo i {
+            font-size: 1.75rem;
+        }   
+
+    
+        .footer {
+            text-align: center;
+            padding: 2rem 0;
+            border-top: 1px solid #e2e8f0;
+            color: #718096;
+            font-size: 0.875rem;
+        }   
+           
+
+        /* Sidebar */
+        .sidebar {
+            flex: 0 0 280px;
+            background: var(--color-surface);
+            border-right: 1px solid var(--color-border);
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+            padding: var(--spacing-xl) 0;
+        }
+
+        .sidebar-header {
+            padding: 0 var(--spacing-lg);
+            margin-bottom: var(--spacing-xl);
+        }
+
+        .sidebar-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--color-text-primary);
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+        }
+
+        .nav-list {
+            list-style: none;
+        }
+
+        .nav-item {
+            margin-bottom: var(--spacing-xs);
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            padding: var(--spacing-sm) var(--spacing-lg);
+            color: var(--color-text-secondary);
+            text-decoration: none;
+            font-size: 0.875rem;
+            transition: all 0.2s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .nav-link:hover,
+        .nav-link.active {
+            background: var(--color-accent-light);
+            color: var(--color-accent);
+            border-left-color: var(--color-accent);
+        }
+
+        .nav-icon {
+            width: 16px;
+            text-align: center;
+        }
+
+        /* Main Content */
+        .main {
+            flex: 1;
+            min-width: 0;
+            padding: var(--spacing-xl);
+            max-width: none;
+        }
+
+        /* Header */
+        .header {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            padding: var(--spacing-2xl);
+            margin-bottom: var(--spacing-xl);
+            text-align: center;
+        }
+
+        .header-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--color-text-primary);
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .header-subtitle {
+            font-size: 1.125rem;
+            color: var(--color-text-secondary);
+            margin-bottom: var(--spacing-lg);
+        }
+
+        .badges {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: var(--spacing-sm);
+        }
+
+        .badge {
+            background: var(--color-accent-light);
+            color: var(--color-accent);
+            padding: var(--spacing-xs) var(--spacing-sm);
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+        }
+
+        /* Sections */
+        .section {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            padding: var(--spacing-xl);
+            margin-bottom: var(--spacing-xl);
+        }
+
+        .section-title {
+            font-size: 1.875rem;
+            font-weight: 700;
+            color: var(--color-text-primary);
+            margin-bottom: var(--spacing-md);
+            padding-bottom: var(--spacing-md);
+            border-bottom: 1px solid var(--color-border);
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+        }
+
+        .section-subtitle {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--color-text-primary);
+            margin: var(--spacing-xl) 0 var(--spacing-md) 0;
+        }
+
+        .section p {
+            color: var(--color-text-secondary);
+            margin-bottom: var(--spacing-md);
+        }
+
+        .section ul {
+            color: var(--color-text-secondary);
+            margin: var(--spacing-md) 0;
+            padding-left: var(--spacing-lg);
+        }
+
+        .section li {
+            margin-bottom: var(--spacing-xs);
+        }
+
+        /* Feature Grid */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: var(--spacing-lg);
+            margin: var(--spacing-lg) 0;
+        }
+
+        .feature-card {
+            background: var(--color-bg);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            padding: var(--spacing-lg);
+            transition: all 0.2s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .feature-card-title {
+            font-weight: 600;
+            color: var(--color-text-primary);
+            margin-bottom: var(--spacing-sm);
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+        }
+
+        .feature-card p {
+            color: var(--color-text-secondary);
+            font-size: 0.875rem;
+            margin: 0;
+        }
+
+        /* Code Blocks */
+        .code-container {
+            margin: var(--spacing-lg) 0;
+            border-radius: var(--border-radius);
+            overflow: hidden;
+            border: 1px solid var(--color-border);
+        }
+
+        .code-header {
+            background: var(--color-bg);
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-bottom: 1px solid var(--color-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .code-lang {
+            color: var(--color-text-muted);
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .code-copy {
+            background: var(--color-accent);
+            color: white;
+            border: none;
+            padding: var(--spacing-xs) var(--spacing-sm);
+            border-radius: calc(var(--border-radius) / 2);
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+        }
+
+        .code-copy:hover {
+            background: #2563eb;
+        }
+
+        .code-container pre {
+            margin: 0;
+            padding: var(--spacing-md);
+            background: #1e293b;
+            overflow-x: auto;
+        }
+
+        .code-container code {
+            font-family: var(--font-mono);
+            font-size: 0.875rem;
+            line-height: 1.5;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: var(--spacing-xs);
+            margin-bottom: var(--spacing-md);
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .tab-button {
+            background: none;
+            border: none;
+            padding: var(--spacing-sm) var(--spacing-md);
+            color: var(--color-text-secondary);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .tab-button.active {
+            color: var(--color-accent);
+            border-bottom-color: var(--color-accent);
+        }
+
+        .tab-button:hover {
+            color: var(--color-text-primary);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Quick Links */
+        .quick-links {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: var(--spacing-lg);
+            margin: var(--spacing-lg) 0;
+        }
+
+        .quick-link {
+            display: block;
+            padding: var(--spacing-lg);
+            background: var(--color-bg);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            text-decoration: none;
+            color: var(--color-text-primary);
+            transition: all 0.2s ease;
+        }
+
+        .quick-link:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .quick-link-title {
+            font-weight: 600;
+            margin-bottom: var(--spacing-sm);
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+        }
+
+        .quick-link p {
+            color: var(--color-text-secondary);
+            font-size: 0.875rem;
+            margin: 0;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: var(--spacing-lg);
+            margin: var(--spacing-lg) 0;
+        }
+
+        .stat-card {
+            text-align: center;
+            padding: var(--spacing-lg);
+            background: var(--color-bg);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--color-text-primary);
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .stat-label {
+            color: var(--color-text-secondary);
+            font-size: 0.875rem;
+        }
+
+        /* Mobile Menu */
+        .mobile-menu-button {
+            display: none;
+            position: fixed;
+            top: var(--spacing-md);
+            left: var(--spacing-md);
+            z-index: 1000;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            padding: var(--spacing-sm);
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .mobile-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+        }
+
+        /* Breadcrumb Navigation */
+        .breadcrumb-nav {
+            background: var(--color-surface);
+            border-bottom: 1px solid var(--color-border);
+            padding: var(--spacing-sm) 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .breadcrumb-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 var(--spacing-lg);
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            font-size: 0.875rem;
+        }
+
+        .breadcrumb-link {
+            color: var(--color-accent);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+            padding: var(--spacing-xs) var(--spacing-sm);
+            border-radius: calc(var(--border-radius) / 2);
+            transition: all 0.2s ease;
+        }
+
+        .breadcrumb-link:hover {
+            background: var(--color-accent-light);
+            color: var(--color-accent);
+        }
+
+        .breadcrumb-separator {
+            color: var(--color-text-muted);
+            font-size: 0.75rem;
+        }
+
+        .breadcrumb-current {
+            color: var(--color-text-primary);
+            font-weight: 500;
+        }
+
+        /* Responsive Design - Clean Flexbox Solution */
+        @media (max-width: 1024px) {
+            .sidebar {
+                flex: 0 0 260px;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .sidebar {
+                flex: 0 0 240px;
+            }
+            
+            .main {
+                padding: var(--spacing-lg);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .layout {
+                display: block;
+            }
+
+            .sidebar {
+                position: fixed;
+                top: 0;
+                left: -280px;
+                width: 280px;
+                flex: none;
+                z-index: 1000;
+                transition: left 0.3s ease;
+                box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+            }
+
+            .sidebar.open {
+                left: 0;
+            }
+
+            .mobile-menu-button {
+                display: block;
+            }
+
+            .mobile-overlay.active {
+                display: block;
+            }
+
+            .main {
+                flex: none;
+                width: 100%;
+                padding: var(--spacing-md);
+                padding-top: calc(var(--spacing-2xl) + 40px);
+            }
+
+            .header {
+                text-align: left;
+                padding: var(--spacing-lg);
+            }
+
+            .header-title {
+                font-size: 2rem;
+            }
+
+            .badges {
+                justify-content: flex-start;
+            }
+
+            .feature-grid,
+            .quick-links,
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .tabs {
+                flex-wrap: wrap;
+            }
+
+            .code-header {
+                flex-direction: column;
+                gap: var(--spacing-sm);
+                align-items: flex-start;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .main {
+                padding: var(--spacing-sm);
+                padding-top: calc(var(--spacing-xl) + 40px);
+            }
+
+            .section {
+                padding: var(--spacing-md);
+            }
+
+            .header-title {
+                font-size: 1.75rem;
+            }
+        }
+
+        /* Prism Theme Override */
+        pre[class*="language-"] {
+            background: #1e293b !important;
+            color: #e2e8f0 !important;
+        }
+
+        .token.comment { color: #64748b !important; }
+        .token.string { color: #22d3ee !important; }
+        .token.keyword { color: #a78bfa !important; }
+        .token.function { color: #fb7185 !important; }
+        .token.number { color: #fbbf24 !important; }
+        .token.operator { color: #e2e8f0 !important; }
+    </style>
+</head>
+<body>
+    <button class="mobile-menu-button" onclick="toggleMobileMenu()">
+        <i class="fas fa-bars"></i>
+    </button>
+
+    <div class="mobile-overlay" id="mobile-overlay" onclick="closeMobileMenu()"></div>
+
+    <div class="topheader">
+            
+            <div class="logo">
+                <a href="/">
+                     <img src="https://prodmedia.tyga.host/public/tyga.cloud/landing/oddsockets.com/oddsockets-logo-words-white-256.png" alt="OddSockets" class="logo">
+                </a>  
+            </div>
+    </div>
+
+    <!-- Breadcrumb Navigation -->
+    <nav class="breadcrumb-nav">
+        <div class="breadcrumb-container">
+
+            <a href="../../docs-index.html" class="breadcrumb-link">
+                <i class="fas fa-home"></i>
+                OddSockets Documentation
+            </a>
+            <i class="fas fa-chevron-right breadcrumb-separator"></i>
+            <span class="breadcrumb-current">C SDK</span>
+        </div>
+    </nav>
+
+    <div class="layout">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2 class="sidebar-title">
+                    <i class="fas fa-book"></i>
+                    Documentation
+                </h2>
+            </div>
+            <nav>
+                <ul class="nav-list">
+                    <li class="nav-item">
+                        <a href="#overview" class="nav-link active">
+                            <i class="fas fa-eye nav-icon"></i>
+                            Overview
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#installation" class="nav-link">
+                            <i class="fas fa-download nav-icon"></i>
+                            Installation
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#quick-start" class="nav-link">
+                            <i class="fas fa-rocket nav-icon"></i>
+                            Quick Start
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#configuration" class="nav-link">
+                            <i class="fas fa-cog nav-icon"></i>
+                            Configuration
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#examples" class="nav-link">
+                            <i class="fas fa-code nav-icon"></i>
+                            Examples
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#embedded" class="nav-link">
+                            <i class="fas fa-microchip nav-icon"></i>
+                            Embedded Systems
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#performance" class="nav-link">
+                            <i class="fas fa-chart-line nav-icon"></i>
+                            Performance
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </aside>
+
+        <main class="main">
+            <header class="header">
+                <h1 class="header-title">OddSockets C SDK</h1>
+                <p class="header-subtitle">Official C SDK for OddSockets real-time messaging platform, optimized for embedded systems and IoT devices</p>
+                <div class="badges">
+                    <span class="badge">
+                        <i class="fas fa-microchip"></i>
+                        Embedded Ready
+                    </span>
+                    <span class="badge">
+                        <i class="fas fa-memory"></i>
+                        Low Memory
+                    </span>
+                    <span class="badge">
+                        <i class="fas fa-shield-alt"></i>
+                        Thread Safe
+                    </span>
+                    <span class="badge">
+                        <i class="fas fa-bolt"></i>
+                        High Performance
+                    </span>
+                    <span class="badge">
+                        <i class="fas fa-cogs"></i>
+                        Cross Platform
+                    </span>
+                </div>
+            </header>
+
+            <section id="overview" class="section">
+                <h2 class="section-title">
+                    <i class="fas fa-eye"></i>
+                    Overview & Features
+                </h2>
+                <p>The OddSockets C SDK provides a lightweight, high-performance interface for real-time messaging specifically designed for embedded systems, IoT devices, and resource-constrained environments.</p>
+                
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <h4 class="feature-card-title">
+                            <i class="fas fa-microchip"></i>
+                            Embedded Optimized
+                        </h4>
+                        <p>Designed for resource-constrained devices with minimal memory footprint and deterministic behavior.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4 class="feature-card-title">
+                            <i class="fas fa-memory"></i>
+                            Memory Efficient
+                        </h4>
+                        <p>Custom allocators, static allocation options, and careful memory management for embedded use.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4 class="feature-card-title">
+                            <i class="fas fa-shield-alt"></i>
+                            Thread Safe
+                        </h4>
+                        <p>Mutex-protected operations safe for multi-threaded embedded applications and RTOS environments.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4 class="feature-card-title">
+                            <i class="fas fa-cogs"></i>
+                            Cross Platform
+                        </h4>
+                        <p>Works on Linux, embedded Linux, FreeRTOS, Arduino, and other POSIX-compatible systems.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4 class="feature-card-title">
+                            <i class="fas fa-sync-alt"></i>
+                            Pattern Compliant
+                        </h4>
+                        <p>100% compliant with JavaScript SDK patterns while optimized for C and embedded constraints.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4 class="feature-card-title">
+                            <i class="fas fa-bolt"></i>
+                            Real-time Ready
+                        </h4>
+                        <p>Deterministic memory usage and timing suitable for real-time and safety-critical applications.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="installation" class="section">
+                <h2 class="section-title">
+                    <i class="fas fa-download"></i>
+                    Installation
+                </h2>
+                
+                <div class="tabs">
+                    <button class="tab-button active" onclick="showTab('cmake')">CMake</button>
+                    <button class="tab-button" onclick="showTab('manual')">Manual</button>
+                    <button class="tab-button" onclick="showTab('embedded')">Embedded</button>
+                </div>
+
+                <div id="cmake" class="tab-content active">
+                    <h3 class="section-subtitle">CMake Build</h3>
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-lang">bash</span>
+                            <button class="code-copy" onclick="copyCode(this)">
+                                <i class="fas fa-copy"></i>
+                                Copy
+                            </button>
+                        </div>
+                        <pre><code class="language-bash">git clone https://github.com/oddsockets/c-sdk.git
+cd c-sdk
+mkdir build && cd build
+cmake ..
+make
+sudo make install</code></pre>
+                    </div>
+                    
+                    <h3 class="section-subtitle">Dependencies</h3>
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-lang">bash</span>
+                            <button class="code-copy" onclick="copyCode(this)">
+                                <i class="fas fa-copy"></i>
+                                Copy
+                            </button>
+                        </div>
+                        <pre><code class="language-bash"># Ubuntu/Debian
+sudo apt-get install libcurl4-openssl-dev libwebsockets-dev libssl-dev
+
+# CentOS/RHEL
+sudo yum install libcurl-devel libwebsockets-devel openssl-devel
+
+# macOS
+brew install curl libwebsockets openssl</code></pre>
+                    </div>
+                </div>
+
+                <div id="manual" class="tab-content">
+                    <h3 class="section-subtitle">Manual Installation</h3>
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-lang">bash</span>
+                            <button class="code-copy" onclick="copyCode(this)">
+                                <i class="fas fa-copy"></i>
+                                Copy
+                            </button>
+                        </div>
+                        <pre><code class="language-bash"># Compile manually
+gcc -std=c99 -Wall -Wextra \
+    -I./src \
+    -lcurl -lwebsockets -lssl -lcrypto -lpthread \
+    src/oddsockets.c \
+    src/manager_discovery.c \
+    src/websocket_client.c \
+    src/message_validator.c \
+    src/json_parser.c \
+    src/http_client.c \
+    your_app.c -o your_app</code></pre>
+                    </div>
+                </div>
+
+                <div id="embedded" class="tab-content">
+                    <h3 class="section-subtitle">Embedded Integration</h3>
+                    <p>For embedded systems, copy these files to your project:</p>
+                    <ul>
+                        <li><code>src/oddsockets.h</code> - Main header</li>
+                        <li><code>src/oddsockets.c</code> - Main implementation</li>
+                        <li><code>src/manager_discovery.c</code> - Manager discovery</li>
+                        <li><code>src/websocket_client.c</code> - WebSocket client</li>
+                        <li><code>src/message_validator.c</code> - Message validation</li>
+                        <li><code>src/json_parser.c</code> - JSON parsing</li>
+                        <li><code>src/http_client.c</code> - HTTP client</li>
+                    </ul>
+                    
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-lang">bash</span>
+                            <button class="code-copy" onclick="copyCode(this)">
+                                <i class="fas fa-copy"></i>
+                                Copy
+                            </button>
+                        </div>
+                        <pre><code class="language-bash"># Cross-compile for ARM
+cmake -DCMAKE_TOOLCHAIN_FILE=cmake/arm-linux-gnueabihf.cmake ..
+make</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <section id="quick-start" class="section">
+                <h2 class="section-title">
+                    <i class="fas fa-rocket"></i>
+                    Quick Start
+                </h2>
+                
+                <h3 class="section-subtitle">Basic Usage</h3>
+                <div class="code-container">
+                    <div class="code-header">
+                        <span class="code-lang">c</span>
+                        <button class="code-copy" onclick="copyCode(this)">
+                            <i class="fas fa-copy"></i>
+                            Copy
+                        </button>
+                    </div>
+                    <pre><code class="language-c">#include "oddsockets.h"
+
+int main() {
+    // Initialize configuration
+    oddsockets_config_t config;
+    oddsockets_config_init(&config, "ak_live_1234567890abcdef");
+    
+    // Create client
+    oddsockets_client_t* client = oddsockets_create(&config);
+    
+    // Connect to platform
+    oddsockets_connect(client);
+    
+    // Create and subscribe to channel
+    oddsockets_channel_t* channel = oddsockets_channel_create(client, "my-channel");
+    oddsockets_channel_subscribe(channel, on_message, NULL, NULL);
+    
+    // Publish a message
+    oddsockets_channel_publish(channel, "Hello from C SDK!", NULL);
+    
+    // Event loop
+    while (oddsockets_get_state(client) == ODDSOCKETS_STATE_CONNECTED) {
+        oddsockets_process_events(client);
+        usleep(10000); // 10ms
+    }
+    
+    // Cleanup
+    oddsockets_channel_destroy(channel);
+    oddsockets_destroy(client);
+    return 0;
+}</code></pre>
+                </div>
+
+                <h3 class="section-subtitle">Message Callback</h3>
+                <div class="code-container">
+                    <div class="code-header">
+                        <span class="code-lang">c</span>
+                        <button class="code-copy" onclick="copyCode(this)">
+                            <i class="fas fa-copy"></i>
+                            Copy
+                        </button>
+                    </div>
+                    <pre><code class="language-c">void on_message(const char* channel_name, const char* message, void* user_data) {
+    printf("Received on %s: %s\n", channel_name, message);
+}
+
+void on_connection_state(oddsockets_state_t state, void* user_data) {
+    printf("Connection state: %s\n", oddsockets_state_string(state));
+}
+
+void on_error(oddsockets_error_t error, const char* message, void* user_data) {
+    printf("Error %d: %s\n", error, message);
+}</code></pre>
+                </div>
+            </section>
+
+            <section id="configuration" class="section">
+                <h2 class="section-title">
+                    <i class="fas fa-cog"></i>
+                    Configuration
+                </h2>
+                
+                <h3 class="section-subtitle">Client Configuration</h3>
+                <div class="code-container">
+                    <div class="code-header">
+                        <span class="code-lang">c</span>
+                        <button class="code-copy" onclick="copyCode(this)">
+                            <i class="fas fa-copy"></i>
+                            Copy
+                        </button>
+                    </div>
+                    <pre><code class="language-c">oddsockets_config_t config;
+oddsockets_config_init(&config, "your-api-key");
+
+// Optional configuration
+strncpy(config.user_id, "user123", sizeof(config.user_id) - 1);
+config.auto_connect = true;
+config.reconnect_attempts = 5;
+config.reconnect_delay_ms = 1000;
+config.connection_timeout_ms = 10000;
+config.enable_ssl = true;
+config.ssl_verify_peer = true;
+
+// Callbacks
+config.connection_callback = on_connection_state;
+config.error_callback = on_error;
+config.log_callback = on_log;
+config.log_level = ODDSOCKETS_LOG_INFO;</code></pre>
+                </div>
+
+                <h3 class="section-subtitle">Channel Options</h3>
+                <div class="code-container">
+                    <div class="code-header">
+                        <span class="code-lang">c</span>
+                        <button class="code-copy" onclick="copyCode(this)">
+                            <i class="fas fa-copy"></i>
+                            Copy
+                        </button>
+                    </div>
+                    <pre><code class="language-c">// Subscribe options
+oddsockets_subscribe_options_t subscribe_options = {
+    .max_history = 100,
+    .retain_history = true,
+    .enable_presence = false
+};
+
+oddsockets_channel_subscribe(channel, callback, user_data, &subscribe_options);
+
+// Publish options
+oddsockets_publish_options_t publish_options = {
+    .ttl_seconds = 3600,
+    .metadata = "priority:high",
+    .store_in_history = true
+};
+
+oddsockets_channel_publish(channel, message, &publish_options);</code></pre>
+                </div>
+            </section>
+
+            <section id="examples" class="section">
+                <h2 class="section-title">
+                    <i class="fas fa-code"></i>
+                    Examples
+                </h2>
+                
+                <p>Explore comprehensive examples demonstrating the OddSockets C SDK in embedded and IoT environments:</p>
+                
+                <div class="quick-links">
+                    <a href="../examples/index.html" class="quick-link">
+                        <h4 class="quick-link-title">
+                            <i class="fas fa-folder-open"></i>
+                            View All Examples
+                        </h4>
+                        <p>Browse embedded examples including FreeRTOS integration, Arduino sketches, and Linux applications</p>
+                    </a>
+                </div>
+            </section>
+
+            <section id="embedded" class="section">
+                <h2 class="section-title">
+                    <i class="fas fa-microchip"></i>
+                    Embedded Systems Integration
+                </h2>
+                
+                <h3 class="section-subtitle">FreeRTOS Integration</h3>
+                <div class="code-container">
+                    <div class="code-header">
+                        <span class="code-lang">c</span>
+                        <button class="code-copy" onclick="copyCode(this)">
+                            <i class="fas fa-copy"></i>
+                            Copy
+                        </button>
+                    </div>
+                    <pre><code class="language-c">#include "FreeRTOS.h"
+#include "task.h"
+#include "oddsockets.h"
+
+void oddsockets_task(void *pvParameters) {
+    oddsockets_config_t config;
+    oddsockets_config_init(&config, "your-api-key");
+    
+    // Use FreeRTOS heap
+    oddsockets_set_memory_functions(pvPortMalloc, vPortFree, pvPortRealloc);
+    
+    oddsockets_client_t* client = oddsockets_create(&config);
+    
+    while (1) {
+        oddsockets_process_events(client);
+        vTaskDelay(pdMS_TO_TICKS(10)); // 10ms delay
+    }
+}
+
+void app_main() {
+    xTaskCreate(oddsockets_task, "oddsockets", 4096, NULL, 5, NULL);
+}</code></pre>
+                </div>
+
+                <h3 class="section-subtitle">Arduino/ESP32 Integration</h3>
+                <div class="code-container">
+                    <div class="code-header">
+                        <span class="code-lang">c</span>
+                        <button class="code-copy" onclick="copyCode(this)">
+                            <i class="fas fa-copy"></i>
+                            Copy
+                        </button>
+                    </div>
+                    <pre><code class="language-c">#include <WiFi.h>
+#include "oddsockets.h"
+
+const char* ssid = "your-wifi";
+const char* password = "your-password";
+
+oddsockets_client_t* client;
+
+void setup() {
+    Serial.begin(115200);
+    
+    // Connect to WiFi
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(1000);
+        Serial.println("Connecting to WiFi...");
+    }
+    
+    // Initialize OddSockets
+    oddsockets_config_t config;
+    oddsockets_config_init(&config, "your-api-key");
+    client = oddsockets_create(&config);
+    
+    oddsockets_connect(client);
+}
+
+void loop() {
+    oddsockets_process_events(client);
+    delay(10);
+}</code></pre>
+                </div>
+
+                <h3 class="section-subtitle">Static Memory Allocation</h3>
+                <div class="code-container">
+                    <div class="code-header">
+                        <span class="code-lang">c</span>
+                        <button class="code-copy" onclick="copyCode(this)">
+                            <i class="fas fa-copy"></i>
+                            Copy
+                        </button>
+                    </div>
+                    <pre><code class="language-c">// Enable static allocation at compile time
+#define ODDSOCKETS_ENABLE_STATIC_ALLOCATION
+
+// Pre-allocated memory pools
+static uint8_t client_memory[ODDSOCKETS_CLIENT_SIZE];
+static uint8_t channel_memory[ODDSOCKETS_MAX_CHANNELS][ODDSOCKETS_CHANNEL_SIZE];
+
+// Custom allocator for deterministic memory usage
+void* embedded_malloc(size_t size) {
+    // Your custom allocation logic
+    return get_from_memory_pool(size);
+}
+
+void embedded_free(void* ptr) {
+    // Your custom deallocation logic
+    return_to_memory_pool(ptr);
+}
+
+int main() {
+    // Set custom memory functions
+    oddsockets_set_memory_functions(embedded_malloc, embedded_free, embedded_realloc);
+    
+    // Rest of your application
+}</code></pre>
+                </div>
+            </section>
+
+            <section id="performance" class="section">
+                <h2 class="section-title">
+                    <i class="fas fa-chart-line"></i>
+                    Performance & Compatibility
+                </h2>
+                <p>OddSockets C SDK delivers exceptional performance optimized for embedded and resource-constrained environments:</p>
+                
+                <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">
+                    <div class="stat-card">
+                        <div class="stat-number">&lt;50ms</div>
+                        <div class="stat-label">Latency</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">&lt;64KB</div>
+                        <div class="stat-label">RAM Usage</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">&lt;128KB</div>
+                        <div class="stat-label">Flash Usage</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">99.9%</div>
+                        <div class="stat-label">Uptime</div>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-xl); margin-top: var(--spacing-xl);">
+                    <div>
+                        <h3 class="section-subtitle">Platform Support</h3>
+                        <ul style="margin: 0;">
+                            <li>Linux (x86, ARM, MIPS)</li>
+                            <li>Embedded Linux</li>
+                            <li>FreeRTOS</li>
+                            <li>Arduino/ESP32</li>
+                            <li>Zephyr RTOS</li>
+                            <li>Custom RTOS</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h3 class="section-subtitle">Compiler Support</h3>
+                        <ul style="margin: 0;">
+                            <li>GCC 7+ (C99)</li>
+                            <li>Clang 8+</li>
+                            <li>ARM GCC</li>
+                            <li>ESP-IDF</li>
+                            <li>Cross-compilation ready</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <h3 class="section-subtitle">Memory Optimization Features</h3>
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <h4 class="feature-card-title">
+                            <i class="fas fa-memory"></i>
+                            Custom Allocators
+                        </h4>
+                        <p>Pluggable memory management for specialized embedded memory systems.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4 class="feature-card-title">
+                            <i class="fas fa-layer-group"></i>
+                            Static Allocation
+                        </h4>
+                        <p>Compile-time memory allocation for deterministic real-time systems.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4 class="feature-card-title">
+                            <i class="fas fa-compress-arrows-alt"></i>
+                            Memory Pools
+                        </h4>
+                        <p>Pre-allocated memory pools to avoid fragmentation in long-running systems.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4 class="feature-card-title">
+                            <i class="fas fa-chart-area"></i>
+                            Memory Tracking
+                        </h4>
+                        <p>Built-in memory usage tracking and leak detection for development.</p>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <div class="footer">
+        <p>&copy; 2025 Tyga.Cloud Ltd. oddsockets.com is a division of Tyga.Cloud Ltd. All rights reserved.</p>
+    </div>
+
+    <script>
+        // Copy code functionality
+        function copyCode(button) {
+            const codeContainer = button.closest('.code-container');
+            const codeElement = codeContainer.querySelector('code');
+            
+            if (codeElement) {
+                const code = codeElement.textContent;
+                navigator.clipboard.writeText(code).then(() => {
+                    const originalText = button.innerHTML;
+                    button.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                    setTimeout(() => {
+                        button.innerHTML = originalText;
+                    }, 2000);
+                }).catch(() => {
+                    // Fallback for older browsers
+                    const textArea = document.createElement('textarea');
+                    textArea.value = code;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    
+                    const originalText = button.innerHTML;
+                    button.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                    setTimeout(() => {
+                        button.innerHTML = originalText;
+                    }, 2000);
+                });
+            }
+        }
+
+        // Tab functionality
+        function showTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Remove active class from all buttons
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+            
+            // Add active class to clicked button
+            event.target.classList.add('active');
+        }
+
+        // Mobile menu functionality
+        function toggleMobileMenu() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('mobile-overlay');
+            
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('active');
+            
+            // Prevent body scroll when menu is open
+            if (sidebar.classList.contains('open')) {
+                document.body.style.overflow = 'hidden';
+            } else {
+                document.body.style.overflow = '';
+            }
+        }
+
+        function closeMobileMenu() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('mobile-overlay');
+            
+            sidebar.classList.remove('open');
+            overlay.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        // Navigation functionality
+        document.querySelectorAll('.nav-link').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const targetId = this.getAttribute('href').substring(1);
+                const targetElement = document.getElementById(targetId);
+                
+                if (targetElement) {
+                    targetElement.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                    
+                    // Update active navigation
+                    document.querySelectorAll('.nav-link').forEach(navLink => {
+                        navLink.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    
+                    // Close mobile menu if open
+                    closeMobileMenu();
+                }
+            });
+        });
+
+        // Update active navigation on scroll
+        window.addEventListener('scroll', function() {
+            const sections = document.querySelectorAll('.section');
+            const navLinks = document.querySelectorAll('.nav-link');
+            
+            let current = '';
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop;
+                if (scrollY >= (sectionTop - 200)) {
+                    current = section.getAttribute('id');
+                }
+            });
+
+            navLinks.forEach(link => {
+                link.classList.remove('active');
+                if (link.getAttribute('href') === '#' + current) {
+                    link.classList.add('active');
+                }
+            });
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', function() {
+            if (window.innerWidth > 768) {
+                closeMobileMenu();
+            }
+        });
+
+        // Initialize Prism.js
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof Prism !== 'undefined') {
+                Prism.highlightAll();
+            }
+        });
+    </script>
+</body>
+</html>
