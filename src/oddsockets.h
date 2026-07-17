@@ -39,7 +39,7 @@ extern "C" {
 #define ODDSOCKETS_DEFAULT_RECONNECT_DELAY_MS 1000
 #define ODDSOCKETS_DEFAULT_CONNECTION_TIMEOUT_MS 10000
 #define ODDSOCKETS_DEFAULT_MESSAGE_TIMEOUT_MS 5000
-#define ODDSOCKETS_DEFAULT_MANAGER_URL "https://manager1.oddsockets.tyga.network"
+#define ODDSOCKETS_DEFAULT_MANAGER_URL "https://connect.oddsockets.tyga.network"
 
 /* Error Codes */
 typedef enum {

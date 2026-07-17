@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdbool.h>
 
-static const char* DEFAULT_MANAGER_URL = "https://manager1.oddsockets.tyga.network";
+static const char* DEFAULT_MANAGER_URL = "https://connect.oddsockets.tyga.network";
 
 /* Alias used by oddsockets.c */
 int manager_discovery_get_url(const char* api_key, char* manager_url, size_t url_buffer_size) {
