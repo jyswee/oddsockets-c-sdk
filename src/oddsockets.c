@@ -11,12 +11,14 @@
 #include "oddsockets.h"
 #include "manager_discovery.h"
 #include "websocket_client.h"
+#include "http_client.h"
 #include "message_validator.h"
 #include "json_parser.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <time.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -61,7 +63,9 @@ struct oddsockets_channel {
     /* Callbacks */
     oddsockets_message_callback_t message_callback;
     void* message_user_data;
-    
+    oddsockets_presence_callback_t presence_callback;
+    void* presence_user_data;
+
     /* Options */
     oddsockets_subscribe_options_t subscribe_options;
     
@@ -192,29 +196,200 @@ static int get_worker_assignment(oddsockets_client_t* client) {
     return ODDSOCKETS_SUCCESS;
 }
 
+/* ---- Socket.IO / Engine.IO framing helpers ----
+ *
+ * The worker speaks genuine Socket.IO (Engine.IO v4). The libwebsockets layer
+ * only carries raw text frames, so the Engine.IO / Socket.IO packet framing is
+ * implemented here, on top of it:
+ *
+ *   server OPEN  "0{...}"          -> we reply CONNECT "40{apiKey,userId}"
+ *   server PING  "2"               -> we reply PONG "3"
+ *   server MSG   "40{sid}"         -> handshake complete (state = CONNECTED)
+ *   server EVENT "42[\"ev\",{..}]" -> routed to the owning channel
+ *   we emit      "42[\"ev\",{..}]" for subscribe / publish / get_presence ...
+ */
+
+static const char* os_skip_ws(const char* p) {
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    return p;
+}
+
+/* Extract a JSON string starting at the opening quote; returns the pointer
+   past the closing quote, or NULL. */
+static const char* os_extract_string(const char* p, char* out, size_t out_size) {
+    if (*p != '"') return NULL;
+    p++;
+    size_t i = 0;
+    while (*p && *p != '"' && i < out_size - 1) {
+        if (*p == '\\' && *(p + 1)) p++;
+        out[i++] = *p++;
+    }
+    out[i] = '\0';
+    if (*p == '"') p++;
+    return p;
+}
+
+/* Copy the raw JSON value for `key` out of an object string. Handles balanced
+   objects/arrays, strings, and primitives - needed because the worker's message
+   envelope carries the published body as a nested object under "message". */
+static bool os_extract_raw_value(const char* obj, const char* key, char* out, size_t out_size) {
+    char needle[160];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    const char* p = strstr(obj, needle);
+    if (!p) return false;
+    p += strlen(needle);
+    p = os_skip_ws(p);
+    if (*p != ':') return false;
+    p++;
+    p = os_skip_ws(p);
+    const char* start = p;
+    if (*p == '{' || *p == '[') {
+        char open = *p, close = (open == '{') ? '}' : ']';
+        int depth = 0;
+        while (*p) {
+            if (*p == open) depth++;
+            else if (*p == close) { depth--; if (depth == 0) { p++; break; } }
+            p++;
+        }
+    } else if (*p == '"') {
+        p++;
+        while (*p && *p != '"') { if (*p == '\\' && *(p + 1)) p++; p++; }
+        if (*p == '"') p++;
+    } else {
+        while (*p && *p != ',' && *p != '}' && *p != ']') p++;
+    }
+    size_t len = (size_t)(p - start);
+    if (len >= out_size) len = out_size - 1;
+    memcpy(out, start, len);
+    out[len] = '\0';
+    return true;
+}
+
+/* Decode a Socket.IO EVENT frame ("42[\"event\",payload]"). Writes the event
+   name and points payload_out at the argument object (or NULL if none). */
+static bool parse_socketio_event_frame(const char* frame, char* event_out,
+                                       size_t event_size, const char** payload_out) {
+    *payload_out = NULL;
+    const char* p = strchr(frame, '[');
+    if (!p) return false;
+    p++;
+    p = os_skip_ws(p);
+    if (*p != '"') return false;
+    p = os_extract_string(p, event_out, event_size);
+    if (!p) return false;
+    p = os_skip_ws(p);
+    if (*p == ',') { p++; p = os_skip_ws(p); }
+    if (*p && *p != ']') *payload_out = p;
+    return true;
+}
+
+/* Send a Socket.IO CONNECT packet carrying auth (lands in handshake.auth,
+   where the worker's io.use() middleware reads socket.handshake.auth.apiKey). */
+static void send_socketio_connect(oddsockets_client_t* client) {
+    char frame[ODDSOCKETS_MAX_API_KEY_LENGTH + ODDSOCKETS_MAX_USER_ID_LENGTH + 64];
+    snprintf(frame, sizeof(frame),
+             "40{\"apiKey\":\"%s\",\"userId\":\"%s\"}",
+             client->config.api_key,
+             client->config.user_id[0] ? client->config.user_id : client->client_identifier);
+    websocket_client_send(client->websocket, frame);
+}
+
+/* Emit a Socket.IO EVENT packet: 42["event",<payload_json>]. */
+static int send_socketio_event(oddsockets_client_t* client, const char* event,
+                               const char* payload_json) {
+    if (!client || !client->websocket) return ODDSOCKETS_ERROR_NOT_CONNECTED;
+    size_t len = strlen(event) + (payload_json ? strlen(payload_json) : 0) + 16;
+    char* frame = custom_malloc(len);
+    if (!frame) return ODDSOCKETS_ERROR_MEMORY_ALLOCATION;
+    if (payload_json && payload_json[0]) {
+        snprintf(frame, len, "42[\"%s\",%s]", event, payload_json);
+    } else {
+        snprintf(frame, len, "42[\"%s\"]", event);
+    }
+    int result = websocket_client_send(client->websocket, frame);
+    custom_free(frame);
+    return result == 0 ? ODDSOCKETS_SUCCESS : ODDSOCKETS_ERROR_WEBSOCKET_ERROR;
+}
+
+/* Look up a channel by name. */
+static oddsockets_channel_t* find_channel(oddsockets_client_t* client, const char* name) {
+    oddsockets_channel_t* channel = NULL;
+    pthread_mutex_lock(&client->mutex);
+    for (int i = 0; i < client->channel_count; i++) {
+        if (strcmp(client->channels[i]->name, name) == 0) { channel = client->channels[i]; break; }
+    }
+    pthread_mutex_unlock(&client->mutex);
+    return channel;
+}
+
+/* Route a decoded Socket.IO event to the owning channel. */
+static void dispatch_socketio_event(oddsockets_client_t* client, const char* event,
+                                    const char* payload) {
+    if (!payload) return;
+
+    json_object_t* pj = json_parse(payload);
+    const char* channel_name = pj ? json_get_string(pj, "channel") : NULL;
+    oddsockets_channel_t* channel = channel_name ? find_channel(client, channel_name) : NULL;
+
+    if (strcmp(event, "message") == 0 && channel && channel->message_callback) {
+        /* The envelope carries the published body as a nested object under
+           "message" - hand the raw JSON to the callback, falling back to the
+           whole envelope if the field cannot be isolated. */
+        char* body = custom_malloc(ODDSOCKETS_MAX_MESSAGE_SIZE);
+        if (body) {
+            if (!os_extract_raw_value(payload, "message", body, ODDSOCKETS_MAX_MESSAGE_SIZE)) {
+                strncpy(body, payload, ODDSOCKETS_MAX_MESSAGE_SIZE - 1);
+                body[ODDSOCKETS_MAX_MESSAGE_SIZE - 1] = '\0';
+            }
+            channel->message_callback(channel->name, body, channel->message_user_data);
+            custom_free(body);
+        }
+    } else if (strcmp(event, "subscribed") == 0 && channel) {
+        channel->subscribed = true;
+        channel->subscribing = false;
+        log_message(client, ODDSOCKETS_LOG_INFO, "Subscribed to channel: %s", channel->name);
+    } else if (strcmp(event, "unsubscribed") == 0 && channel) {
+        channel->subscribed = false;
+        log_message(client, ODDSOCKETS_LOG_INFO, "Unsubscribed from channel: %s", channel->name);
+    } else if (strcmp(event, "published") == 0) {
+        /* Publish acknowledgement (messageId available in payload). */
+    } else if (strcmp(event, "presence") == 0 && channel && channel->presence_callback) {
+        char occ[32] = "0";
+        os_extract_raw_value(payload, "occupancy", occ, sizeof(occ));
+        channel->presence_callback(channel->name, "occupancy", occ, channel->presence_user_data);
+    } else if (strcmp(event, "error") == 0) {
+        char msg[256] = "worker error";
+        os_extract_raw_value(payload, "message", msg, sizeof(msg));
+        handle_error(client, ODDSOCKETS_ERROR_WEBSOCKET_ERROR, msg);
+    }
+
+    if (pj) json_free(pj);
+}
+
 /* WebSocket Event Handlers */
 static void on_websocket_connected(void* user_data) {
     oddsockets_client_t* client = (oddsockets_client_t*)user_data;
-    set_state(client, ODDSOCKETS_STATE_CONNECTED);
-    client->reconnect_attempts = 0;
+    /* The raw WebSocket is up, but we are not a live Socket.IO client until the
+       Engine.IO OPEN -> CONNECT -> CONNECT-ack handshake completes. */
+    log_message(client, ODDSOCKETS_LOG_DEBUG, "WebSocket established, awaiting Socket.IO handshake");
 }
 
 static void on_websocket_disconnected(void* user_data) {
     oddsockets_client_t* client = (oddsockets_client_t*)user_data;
     set_state(client, ODDSOCKETS_STATE_DISCONNECTED);
-    
+
     /* Schedule reconnection if not manually disconnected */
     if (client->reconnect_attempts < client->config.reconnect_attempts) {
         set_state(client, ODDSOCKETS_STATE_RECONNECTING);
         client->reconnect_attempts++;
-        
+
         /* Exponential backoff */
         int delay = client->config.reconnect_delay_ms * (1 << (client->reconnect_attempts - 1));
         if (delay > 30000) delay = 30000; /* Max 30 seconds */
-        
-        log_message(client, ODDSOCKETS_LOG_INFO, "Reconnecting in %dms (attempt %d/%d)", 
+
+        log_message(client, ODDSOCKETS_LOG_INFO, "Reconnecting in %dms (attempt %d/%d)",
                    delay, client->reconnect_attempts, client->config.reconnect_attempts);
-        
+
         usleep(delay * 1000);
         oddsockets_connect(client);
     }
@@ -222,53 +397,45 @@ static void on_websocket_disconnected(void* user_data) {
 
 static void on_websocket_message(const char* message, void* user_data) {
     oddsockets_client_t* client = (oddsockets_client_t*)user_data;
-    
-    /* Parse message */
-    json_object_t* json = json_parse(message);
-    if (!json) {
-        log_message(client, ODDSOCKETS_LOG_WARN, "Failed to parse WebSocket message: %s", message);
-        return;
-    }
-    
-    const char* event_type = json_get_string(json, "type");
-    const char* channel_name = json_get_string(json, "channel");
-    
-    if (!event_type) {
-        json_free(json);
-        return;
-    }
-    
-    /* Find channel */
-    oddsockets_channel_t* channel = NULL;
-    if (channel_name) {
-        pthread_mutex_lock(&client->mutex);
-        for (int i = 0; i < client->channel_count; i++) {
-            if (strcmp(client->channels[i]->name, channel_name) == 0) {
-                channel = client->channels[i];
-                break;
+    if (!message || !message[0]) return;
+
+    /* The Engine.IO packet type is the leading digit of the frame. */
+    switch (message[0]) {
+        case '0': /* OPEN - reply with a Socket.IO CONNECT carrying auth */
+            send_socketio_connect(client);
+            break;
+        case '2': /* PING - reply PONG */
+            websocket_client_send(client->websocket, "3");
+            break;
+        case '3': /* PONG */
+            break;
+        case '4': /* MESSAGE - a Socket.IO packet follows */
+            switch (message[1]) {
+                case '0': /* CONNECT ack - the handshake is complete */
+                    set_state(client, ODDSOCKETS_STATE_CONNECTED);
+                    client->reconnect_attempts = 0;
+                    break;
+                case '1': /* DISCONNECT */
+                    set_state(client, ODDSOCKETS_STATE_DISCONNECTED);
+                    break;
+                case '2': { /* EVENT */
+                    char event[64];
+                    const char* payload = NULL;
+                    if (parse_socketio_event_frame(message, event, sizeof(event), &payload)) {
+                        dispatch_socketio_event(client, event, payload);
+                    }
+                    break;
+                }
+                case '4': /* CONNECT_ERROR */
+                    handle_error(client, ODDSOCKETS_ERROR_CONNECTION_FAILED, "Socket.IO connect error");
+                    break;
+                default:
+                    break;
             }
-        }
-        pthread_mutex_unlock(&client->mutex);
+            break;
+        default:
+            break;
     }
-    
-    /* Handle different event types */
-    if (strcmp(event_type, "message") == 0 && channel) {
-        const char* msg_content = json_get_string(json, "message");
-        if (msg_content && channel->message_callback) {
-            channel->message_callback(channel_name, msg_content, channel->message_user_data);
-        }
-    }
-    else if (strcmp(event_type, "subscribed") == 0 && channel) {
-        channel->subscribed = true;
-        channel->subscribing = false;
-        log_message(client, ODDSOCKETS_LOG_INFO, "Subscribed to channel: %s", channel_name);
-    }
-    else if (strcmp(event_type, "unsubscribed") == 0 && channel) {
-        channel->subscribed = false;
-        log_message(client, ODDSOCKETS_LOG_INFO, "Unsubscribed from channel: %s", channel_name);
-    }
-    
-    json_free(json);
 }
 
 static void on_websocket_error(const char* error_message, void* user_data) {
@@ -352,21 +519,22 @@ int oddsockets_connect(oddsockets_client_t* client) {
         return result;
     }
     
-    /* Create WebSocket client */
-    websocket_config_t ws_config = {
-        .url = client->worker_url,
-        .enable_ssl = client->config.enable_ssl,
-        .ssl_verify_peer = client->config.ssl_verify_peer,
-        .ca_cert_path = client->config.ca_cert_path,
-        .connection_timeout_ms = client->config.connection_timeout_ms,
-        .on_connected = on_websocket_connected,
-        .on_disconnected = on_websocket_disconnected,
-        .on_message = on_websocket_message,
-        .on_error = on_websocket_error,
-        .user_data = client
-    };
-    
-    /* Add authentication headers */
+    /* Create WebSocket client (array members are copied, not aliased). */
+    websocket_config_t ws_config;
+    memset(&ws_config, 0, sizeof(ws_config));
+    strncpy(ws_config.url, client->worker_url, sizeof(ws_config.url) - 1);
+    strncpy(ws_config.ca_cert_path, client->config.ca_cert_path, sizeof(ws_config.ca_cert_path) - 1);
+    ws_config.enable_ssl = client->config.enable_ssl;
+    ws_config.ssl_verify_peer = client->config.ssl_verify_peer;
+    ws_config.connection_timeout_ms = client->config.connection_timeout_ms;
+    ws_config.on_connected = on_websocket_connected;
+    ws_config.on_disconnected = on_websocket_disconnected;
+    ws_config.on_message = on_websocket_message;
+    ws_config.on_error = on_websocket_error;
+    ws_config.user_data = client;
+
+    /* Auth travels in the Socket.IO handshake (send_socketio_connect), not an
+       HTTP header, but keep the header populated for transports that use it. */
     snprintf(ws_config.auth_header, sizeof(ws_config.auth_header),
              "Authorization: Bearer %s", client->config.api_key);
     
@@ -445,14 +613,15 @@ void oddsockets_destroy(oddsockets_client_t* client) {
     
     /* Disconnect if connected */
     oddsockets_disconnect(client);
-    
-    /* Destroy all channels */
-    pthread_mutex_lock(&client->mutex);
-    for (int i = 0; i < client->channel_count; i++) {
-        oddsockets_channel_destroy(client->channels[i]);
+
+    /* Destroy all channels. oddsockets_channel_destroy() takes client->mutex and
+       removes the channel from the list itself, so it must NOT be called while
+       the mutex is held (the mutex is not recursive) - draining from the head
+       lets each destroy remove its own entry. */
+    while (client->channel_count > 0) {
+        oddsockets_channel_destroy(client->channels[0]);
     }
-    pthread_mutex_unlock(&client->mutex);
-    
+
     /* Cleanup */
     pthread_mutex_destroy(&client->mutex);
     
@@ -540,18 +709,19 @@ int oddsockets_channel_subscribe(oddsockets_channel_t* channel,
         channel->subscribe_options.enable_presence = false;
     }
     
-    /* Send subscribe message */
-    char subscribe_msg[512];
-    snprintf(subscribe_msg, sizeof(subscribe_msg),
-             "{\"type\":\"subscribe\",\"channel\": \"%s\",\"options\":{\"maxHistory\":%d,\"retainHistory\":%s,\"enablePresence\":%s}}",
+    /* Emit a Socket.IO "subscribe" event (options in camelCase, as the worker
+       reads them). */
+    char payload[512];
+    snprintf(payload, sizeof(payload),
+             "{\"channel\":\"%s\",\"options\":{\"maxHistory\":%d,\"retainHistory\":%s,\"enablePresence\":%s}}",
              channel->name,
              channel->subscribe_options.max_history,
              channel->subscribe_options.retain_history ? "true" : "false",
              channel->subscribe_options.enable_presence ? "true" : "false");
-    
+
     channel->subscribing = true;
-    
-    int result = websocket_client_send(channel->client->websocket, subscribe_msg);
+
+    int result = send_socketio_event(channel->client, "subscribe", payload);
     if (result != ODDSOCKETS_SUCCESS) {
         channel->subscribing = false;
         handle_error(channel->client, result, "Failed to send subscribe message");
@@ -575,12 +745,11 @@ int oddsockets_channel_unsubscribe(oddsockets_channel_t* channel) {
         return ODDSOCKETS_ERROR_NOT_CONNECTED;
     }
     
-    /* Send unsubscribe message */
-    char unsubscribe_msg[256];
-    snprintf(unsubscribe_msg, sizeof(unsubscribe_msg),
-             "{\"type\":\"unsubscribe\",\"channel\":\"%s\"}", channel->name);
-    
-    int result = websocket_client_send(channel->client->websocket, unsubscribe_msg);
+    /* Emit a Socket.IO "unsubscribe" event. */
+    char payload[192];
+    snprintf(payload, sizeof(payload), "{\"channel\":\"%s\"}", channel->name);
+
+    int result = send_socketio_event(channel->client, "unsubscribe", payload);
     if (result != ODDSOCKETS_SUCCESS) {
         handle_error(channel->client, result, "Failed to send unsubscribe message");
         return result;
@@ -607,28 +776,45 @@ int oddsockets_channel_publish(oddsockets_channel_t* channel,
         return validation_result;
     }
     
-    /* Build publish message */
-    char* publish_msg = custom_malloc(strlen(message) + 512);
-    if (!publish_msg) {
+    /* Embed the message raw when it is already JSON (an object or array),
+       otherwise as a JSON string. This lets callers publish structured bodies
+       - e.g. {"text":"..","nonce":".."} - which the worker delivers verbatim. */
+    const char* m = message;
+    while (*m == ' ' || *m == '\t') m++;
+    bool raw = (*m == '{' || *m == '[');
+
+    size_t cap = strlen(message) + 768;
+    char* payload = custom_malloc(cap);
+    if (!payload) {
         return ODDSOCKETS_ERROR_MEMORY_ALLOCATION;
     }
-    
-    if (options && options->metadata) {
-        snprintf(publish_msg, strlen(message) + 512,
-                 "{\"type\":\"publish\",\"channel\":\"%s\",\"message\":\"%s\",\"options\":{\"ttl\":%d,\"metadata\":\"%s\",\"storeInHistory\":%s}}",
-                 channel->name, message,
-                 options->ttl_seconds,
-                 options->metadata,
-                 options->store_in_history ? "true" : "false");
+
+    int n = snprintf(payload, cap, "{\"channel\":\"%s\",\"message\":", channel->name);
+    if (raw) {
+        n += snprintf(payload + n, cap - n, "%s", message);
     } else {
-        snprintf(publish_msg, strlen(message) + 512,
-                 "{\"type\":\"publish\",\"channel\":\"%s\",\"message\":\"%s\"}",
-                 channel->name, message);
+        n += snprintf(payload + n, cap - n, "\"%s\"", message);
     }
-    
-    int result = websocket_client_send(channel->client->websocket, publish_msg);
-    custom_free(publish_msg);
-    
+
+    /* Only attach options when provided - the worker's handler defaults them on
+       `undefined`, and a JSON null would crash it. */
+    if (options) {
+        if (options->metadata) {
+            n += snprintf(payload + n, cap - n,
+                          ",\"options\":{\"ttl\":%d,\"storeInHistory\":%s,\"metadata\":\"%s\"}",
+                          options->ttl_seconds, options->store_in_history ? "true" : "false",
+                          options->metadata);
+        } else {
+            n += snprintf(payload + n, cap - n,
+                          ",\"options\":{\"ttl\":%d,\"storeInHistory\":%s}",
+                          options->ttl_seconds, options->store_in_history ? "true" : "false");
+        }
+    }
+    snprintf(payload + n, cap - n, "}");
+
+    int result = send_socketio_event(channel->client, "publish", payload);
+    custom_free(payload);
+
     if (result != ODDSOCKETS_SUCCESS) {
         handle_error(channel->client, result, "Failed to send publish message");
         return result;
@@ -636,6 +822,27 @@ int oddsockets_channel_publish(oddsockets_channel_t* channel,
     
     log_message(channel->client, ODDSOCKETS_LOG_DEBUG, "Published to channel: %s", channel->name);
     return ODDSOCKETS_SUCCESS;
+}
+
+int oddsockets_channel_get_presence(oddsockets_channel_t* channel,
+                                   oddsockets_presence_callback_t callback,
+                                   void* user_data) {
+    if (!channel || !callback) {
+        return ODDSOCKETS_ERROR_INVALID_PARAMETER;
+    }
+
+    if (channel->client->state != ODDSOCKETS_STATE_CONNECTED) {
+        return ODDSOCKETS_ERROR_NOT_CONNECTED;
+    }
+
+    channel->presence_callback = callback;
+    channel->presence_user_data = user_data;
+
+    /* Emit a Socket.IO "get_presence" event; the worker replies with a
+       "presence" event carrying occupancy, routed back to the callback. */
+    char payload[192];
+    snprintf(payload, sizeof(payload), "{\"channel\":\"%s\"}", channel->name);
+    return send_socketio_event(channel->client, "get_presence", payload);
 }
 
 bool oddsockets_channel_is_subscribed(oddsockets_channel_t* channel) {

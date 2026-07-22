@@ -21,8 +21,23 @@ struct websocket_client {
     char* pending_send;
     size_t pending_send_len;
 
+    /* Periodic scheduler wakeup - see wake_cb below. */
+    struct lws_sorted_usec_list wake_sul;
+
     pthread_mutex_t mutex;
 };
+
+/* Since libwebsockets v3.2, lws_service() sleeps until an event is queued on
+   its context. When two independent clients (each with its own context) are
+   pumped from a single thread, servicing an idle context would block and starve
+   the other. A self-rescheduling scheduled timer keeps an event always pending
+   so each lws_service() call returns promptly and the pump stays responsive. */
+#define WAKE_INTERVAL_US 5000
+
+static void wake_cb(struct lws_sorted_usec_list* sul) {
+    websocket_client_t* client = lws_container_of(sul, websocket_client_t, wake_sul);
+    lws_sul_schedule(client->context, 0, &client->wake_sul, wake_cb, WAKE_INTERVAL_US);
+}
 
 /* libwebsockets callback */
 static int lws_callback(struct lws* wsi, enum lws_callback_reasons reason,
@@ -97,6 +112,9 @@ static const struct lws_protocols protocols[] = {
 websocket_client_t* websocket_client_create(const websocket_config_t* config) {
     if (!config || !config->url[0]) return NULL;
 
+    /* Keep libwebsockets quiet - only surface real errors. */
+    lws_set_log_level(LLL_ERR, NULL);
+
     websocket_client_t* client = calloc(1, sizeof(websocket_client_t));
     if (!client) return NULL;
 
@@ -115,6 +133,9 @@ websocket_client_t* websocket_client_create(const websocket_config_t* config) {
         free(client);
         return NULL;
     }
+
+    /* Start the periodic wakeup so lws_service() never blocks the pump. */
+    lws_sul_schedule(client->context, 0, &client->wake_sul, wake_cb, WAKE_INTERVAL_US);
 
     return client;
 }
@@ -202,6 +223,7 @@ void websocket_client_destroy(websocket_client_t* client) {
     websocket_client_disconnect(client);
 
     if (client->context) {
+        lws_sul_cancel(&client->wake_sul);
         lws_context_destroy(client->context);
         client->context = NULL;
     }

@@ -1,0 +1,15 @@
+OddSockets C SDK - two-client round-trip proof
+Captured: 2026-07-22T10:25:40Z
+Command: docker run --rm -e ODDSOCKETS_API_KEY=ak_... oddsockets-c-demo
+
+[connect] connecting both clients...
+[alice] worker w002-oddsockets-1
+[bob]   worker w002-oddsockets-1
+[connect] alice = connected, bob = connected
+[alice] subscribed to demo-161746 (presence on)
+[bob] published to demo-161746
+[alice] received bob's message (nonce matched) - real round-trip.
+[alice] presence: 1 user(s).
+[alice] unsubscribed.
+
+OK - cross-client round-trip verified
