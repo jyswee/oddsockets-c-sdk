@@ -13,6 +13,7 @@ extern "C" {
 #endif
 
 #include <stddef.h>
+#include <stdbool.h>
 
 /* Configuration Constants */
 #define ODDSOCKETS_MAX_URL_LENGTH 512
