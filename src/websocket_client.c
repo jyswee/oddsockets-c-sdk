@@ -10,6 +10,16 @@
 
 #define MAX_PAYLOAD 65536
 
+/* A single queued outbound frame. Sends are FIFO: rapid successive sends
+   (e.g. start_typing immediately followed by add_reaction) must each be
+   delivered, so they are appended to a queue and drained one per
+   LWS_CALLBACK_CLIENT_WRITEABLE rather than overwriting a single slot. */
+typedef struct ws_send_node {
+    char* data;
+    size_t len;
+    struct ws_send_node* next;
+} ws_send_node_t;
+
 struct websocket_client {
     websocket_config_t config;
     struct lws_context* context;
@@ -17,9 +27,9 @@ struct websocket_client {
     bool connected;
     bool should_close;
 
-    /* Send queue */
-    char* pending_send;
-    size_t pending_send_len;
+    /* Outbound FIFO send queue (head = next to write, tail = most recent). */
+    ws_send_node_t* send_head;
+    ws_send_node_t* send_tail;
 
     /* Periodic scheduler wakeup - see wake_cb below. */
     struct lws_sorted_usec_list wake_sul;
@@ -65,21 +75,34 @@ static int lws_callback(struct lws* wsi, enum lws_callback_reasons reason,
             }
             break;
 
-        case LWS_CALLBACK_CLIENT_WRITEABLE:
+        case LWS_CALLBACK_CLIENT_WRITEABLE: {
+            /* Drain exactly one queued frame per writable callback; if more
+               remain, ask libwebsockets to call us back so the whole queue is
+               flushed in order without any frame overwriting another. */
             pthread_mutex_lock(&client->mutex);
-            if (client->pending_send && client->pending_send_len > 0) {
-                unsigned char* buf = malloc(LWS_PRE + client->pending_send_len);
-                if (buf) {
-                    memcpy(buf + LWS_PRE, client->pending_send, client->pending_send_len);
-                    lws_write(wsi, buf + LWS_PRE, client->pending_send_len, LWS_WRITE_TEXT);
-                    free(buf);
-                }
-                free(client->pending_send);
-                client->pending_send = NULL;
-                client->pending_send_len = 0;
+            ws_send_node_t* node = client->send_head;
+            if (node) {
+                client->send_head = node->next;
+                if (!client->send_head) client->send_tail = NULL;
             }
+            bool more = (client->send_head != NULL);
             pthread_mutex_unlock(&client->mutex);
+
+            if (node) {
+                if (node->len > 0) {
+                    unsigned char* buf = malloc(LWS_PRE + node->len);
+                    if (buf) {
+                        memcpy(buf + LWS_PRE, node->data, node->len);
+                        lws_write(wsi, buf + LWS_PRE, node->len, LWS_WRITE_TEXT);
+                        free(buf);
+                    }
+                }
+                free(node->data);
+                free(node);
+            }
+            if (more) lws_callback_on_writable(wsi);
             break;
+        }
 
         case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
             client->connected = false;
@@ -190,12 +213,21 @@ int websocket_client_connect(websocket_client_t* client) {
 int websocket_client_send(websocket_client_t* client, const char* message) {
     if (!client || !message || !client->connected) return -1;
 
+    ws_send_node_t* node = malloc(sizeof(ws_send_node_t));
+    if (!node) return -1;
+    node->len = strlen(message);
+    node->next = NULL;
+    node->data = malloc(node->len + 1);
+    if (!node->data) { free(node); return -1; }
+    memcpy(node->data, message, node->len + 1);
+
+    /* Append to the tail so frames leave in the order they were queued. */
     pthread_mutex_lock(&client->mutex);
-    free(client->pending_send);
-    client->pending_send_len = strlen(message);
-    client->pending_send = malloc(client->pending_send_len + 1);
-    if (client->pending_send) {
-        memcpy(client->pending_send, message, client->pending_send_len + 1);
+    if (client->send_tail) {
+        client->send_tail->next = node;
+        client->send_tail = node;
+    } else {
+        client->send_head = client->send_tail = node;
     }
     pthread_mutex_unlock(&client->mutex);
 
@@ -229,8 +261,14 @@ void websocket_client_destroy(websocket_client_t* client) {
     }
 
     pthread_mutex_lock(&client->mutex);
-    free(client->pending_send);
-    client->pending_send = NULL;
+    ws_send_node_t* node = client->send_head;
+    while (node) {
+        ws_send_node_t* next = node->next;
+        free(node->data);
+        free(node);
+        node = next;
+    }
+    client->send_head = client->send_tail = NULL;
     pthread_mutex_unlock(&client->mutex);
 
     pthread_mutex_destroy(&client->mutex);

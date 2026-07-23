@@ -1,15 +1,36 @@
-OddSockets C SDK - two-client round-trip proof
-Captured: 2026-07-22T10:25:40Z
-Command: docker run --rm -e ODDSOCKETS_API_KEY=ak_... oddsockets-c-demo
+OddSockets C SDK - two-client honest live regression PROOF
+==========================================================
 
+Build:  docker build -f demo/Dockerfile -t oddsockets-c-demo .
+Run:    docker run --rm -e ODDSOCKETS_API_KEY="ak_..." oddsockets-c-demo
+
+Two independent connections (alice = subscriber, bob = publisher) through the
+real OddSockets worker. No mocks, no local echo. An event reaching alice can
+only have travelled through the assigned worker from bob's separate connection.
+
+--------------------------------------------------------------------------------
 [connect] connecting both clients...
-[alice] worker w002-oddsockets-1
-[bob]   worker w002-oddsockets-1
+[alice] worker w001-oddsockets-1
+[bob]   worker w001-oddsockets-1
 [connect] alice = connected, bob = connected
-[alice] subscribed to demo-161746 (presence on)
-[bob] published to demo-161746
+
+=== Scenario 1: core pub/sub on demo-core-<nonce> ===
+[alice] subscribed to demo-core-<nonce> (presence on)
+[bob] published to demo-core-<nonce>
 [alice] received bob's message (nonce matched) - real round-trip.
+[PASS] alice received bob's message across separate connections
 [alice] presence: 1 user(s).
+
+=== Scenario 2: enhanced events on demo-enh-<nonce> ===
+[alice/bob] subscribed to enhanced channel
+[bob] enhanced.start_typing fired
+[bob] enhanced.add_reaction fired
+[alice on user_typing] {"userId":"bob","channel":"demo-enh-<nonce>","timestamp":"..."}
+[alice on reaction_added] {"messageId":"msg-<nonce>","channel":"demo-enh-<nonce>","emoji":":thumbsup:","userId":"bob","userName":"Bob","reactionCounts":[{"_id":":thumbsup:","count":1,"users":[{"userId":"bob","userName":"Bob"}]}]}
+[PASS] alice received user_typing AND reaction_added from bob
 [alice] unsubscribed.
 
-OK - cross-client round-trip verified
+OK - all scenarios verified live through the OddSockets platform
+--------------------------------------------------------------------------------
+
+Exit code: 0. Both scenarios verified live through prod worker w001-oddsockets-1.

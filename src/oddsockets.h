@@ -112,6 +112,14 @@ typedef void (*oddsockets_log_callback_t)(oddsockets_log_level_t level,
                                          const char* message,
                                          void* user_data);
 
+/* Raw Socket.IO event callback. Receives the event name and the event payload
+   rendered as a JSON string (may be NULL if the event carried no argument).
+   Used to observe enhanced (Slack-like) broadcasts such as "user_typing" and
+   "reaction_added" on the live connection. */
+typedef void (*oddsockets_event_callback_t)(const char* event,
+                                            const char* payload_json,
+                                            void* user_data);
+
 /* Configuration Structure */
 typedef struct {
     /* Required */
@@ -219,6 +227,33 @@ int oddsockets_get_worker_info(oddsockets_client_t* client,
  * @return ODDSOCKETS_SUCCESS on success, error code on failure
  */
 int oddsockets_process_events(oddsockets_client_t* client);
+
+/**
+ * Emit a raw Socket.IO event over the live connection.
+ * Sends 42["<event>",<payload_json>] to the worker. The payload must already
+ * be a valid JSON value (object/array/primitive); pass NULL for no argument.
+ * @param client Client instance
+ * @param event Event name
+ * @param payload_json Payload rendered as JSON, or NULL
+ * @return ODDSOCKETS_SUCCESS on success, error code on failure
+ */
+int oddsockets_emit(oddsockets_client_t* client,
+                    const char* event,
+                    const char* payload_json);
+
+/**
+ * Register a handler for a raw Socket.IO event (e.g. "user_typing").
+ * The handler receives the event payload as a JSON string on each occurrence.
+ * @param client Client instance
+ * @param event Event name to listen for
+ * @param callback Handler invoked with the payload JSON
+ * @param user_data User data passed to the handler
+ * @return ODDSOCKETS_SUCCESS on success, error code on failure
+ */
+int oddsockets_on(oddsockets_client_t* client,
+                  const char* event,
+                  oddsockets_event_callback_t callback,
+                  void* user_data);
 
 /**
  * Destroy client and free resources
