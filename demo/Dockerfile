@@ -29,6 +29,7 @@ COPY . /sdk
 RUN gcc -O2 -Wall -I src \
       demo/demo.c \
       src/oddsockets.c \
+      src/enhanced_features.c \
       src/websocket_client.c \
       src/http_client.c \
       src/json_parser.c \

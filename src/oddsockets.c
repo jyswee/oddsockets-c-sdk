@@ -24,31 +24,43 @@
 #include <unistd.h>
 #include <sys/time.h>
 
+/* A raw Socket.IO event listener registered via oddsockets_on(). */
+#define ODDSOCKETS_MAX_RAW_HANDLERS 32
+typedef struct {
+    char event[64];
+    oddsockets_event_callback_t callback;
+    void* user_data;
+} oddsockets_raw_handler_t;
+
 /* Internal Structures */
 struct oddsockets_client {
     oddsockets_config_t config;
     oddsockets_state_t state;
-    
+
     /* Connection Management */
     websocket_client_t* websocket;
     char worker_url[ODDSOCKETS_MAX_URL_LENGTH];
     char worker_id[64];
     char session_id[128];
     char client_identifier[256];
-    
+
     /* Reconnection */
     int reconnect_attempts;
     time_t last_reconnect_time;
-    
+
     /* Channels */
     oddsockets_channel_t* channels[ODDSOCKETS_MAX_CHANNELS];
     int channel_count;
-    
+
+    /* Raw Socket.IO event listeners (enhanced broadcasts land here). */
+    oddsockets_raw_handler_t raw_handlers[ODDSOCKETS_MAX_RAW_HANDLERS];
+    int raw_handler_count;
+
     /* Threading */
     pthread_mutex_t mutex;
     pthread_t event_thread;
     bool event_thread_running;
-    
+
     /* Memory Management */
     size_t allocated_bytes;
     size_t peak_bytes;
@@ -267,19 +279,28 @@ static bool os_extract_raw_value(const char* obj, const char* key, char* out, si
 
 /* Decode a Socket.IO EVENT frame ("42[\"event\",payload]"). Writes the event
    name and points payload_out at the argument object (or NULL if none). */
-static bool parse_socketio_event_frame(const char* frame, char* event_out,
+static bool parse_socketio_event_frame(char* frame, char* event_out,
                                        size_t event_size, const char** payload_out) {
     *payload_out = NULL;
-    const char* p = strchr(frame, '[');
+    char* p = strchr(frame, '[');
     if (!p) return false;
     p++;
-    p = os_skip_ws(p);
+    p = (char*)os_skip_ws(p);
     if (*p != '"') return false;
-    p = os_extract_string(p, event_out, event_size);
+    p = (char*)os_extract_string(p, event_out, event_size);
     if (!p) return false;
-    p = os_skip_ws(p);
-    if (*p == ',') { p++; p = os_skip_ws(p); }
-    if (*p && *p != ']') *payload_out = p;
+    p = (char*)os_skip_ws(p);
+    if (*p == ',') { p++; p = (char*)os_skip_ws(p); }
+    if (*p && *p != ']') {
+        /* Trim the frame's closing ']' (and any trailing whitespace) so the
+           argument handed to on() listeners is valid, standalone JSON rather
+           than "<arg>]". The payload's own brackets are untouched. */
+        char* end = frame + strlen(frame);
+        while (end > p && (end[-1] == ' ' || end[-1] == '\t' ||
+                           end[-1] == '\r' || end[-1] == '\n')) end--;
+        if (end > p && end[-1] == ']') end[-1] = '\0';
+        *payload_out = p;
+    }
     return true;
 }
 
@@ -325,6 +346,24 @@ static oddsockets_channel_t* find_channel(oddsockets_client_t* client, const cha
 /* Route a decoded Socket.IO event to the owning channel. */
 static void dispatch_socketio_event(oddsockets_client_t* client, const char* event,
                                     const char* payload) {
+    /* Fan the event out to any raw listeners registered via oddsockets_on()
+       first - this is the receive path for enhanced (Slack-like) broadcasts
+       such as "user_typing" and "reaction_added". Snapshot the matching
+       handlers under the lock, then invoke them unlocked so a callback can
+       safely re-enter the client. */
+    oddsockets_raw_handler_t matched[ODDSOCKETS_MAX_RAW_HANDLERS];
+    int matched_count = 0;
+    pthread_mutex_lock(&client->mutex);
+    for (int i = 0; i < client->raw_handler_count; i++) {
+        if (strcmp(client->raw_handlers[i].event, event) == 0) {
+            matched[matched_count++] = client->raw_handlers[i];
+        }
+    }
+    pthread_mutex_unlock(&client->mutex);
+    for (int i = 0; i < matched_count; i++) {
+        matched[i].callback(event, payload, matched[i].user_data);
+    }
+
     if (!payload) return;
 
     json_object_t* pj = json_parse(payload);
@@ -418,10 +457,11 @@ static void on_websocket_message(const char* message, void* user_data) {
                 case '1': /* DISCONNECT */
                     set_state(client, ODDSOCKETS_STATE_DISCONNECTED);
                     break;
-                case '2': { /* EVENT */
+                case '2': { /* EVENT - the buffer is owned for this call, so it
+                               is safe to parse (and trim) in place. */
                     char event[64];
                     const char* payload = NULL;
-                    if (parse_socketio_event_frame(message, event, sizeof(event), &payload)) {
+                    if (parse_socketio_event_frame((char*)message, event, sizeof(event), &payload)) {
                         dispatch_socketio_event(client, event, payload);
                     }
                     break;
@@ -605,6 +645,41 @@ int oddsockets_process_events(oddsockets_client_t* client) {
         return websocket_client_process_events(client->websocket);
     }
     
+    return ODDSOCKETS_SUCCESS;
+}
+
+int oddsockets_emit(oddsockets_client_t* client, const char* event,
+                    const char* payload_json) {
+    if (!client || !event || !event[0]) {
+        return ODDSOCKETS_ERROR_INVALID_PARAMETER;
+    }
+    if (client->state != ODDSOCKETS_STATE_CONNECTED) {
+        return ODDSOCKETS_ERROR_NOT_CONNECTED;
+    }
+    return send_socketio_event(client, event, payload_json);
+}
+
+int oddsockets_on(oddsockets_client_t* client, const char* event,
+                  oddsockets_event_callback_t callback, void* user_data) {
+    if (!client || !event || !event[0] || !callback) {
+        return ODDSOCKETS_ERROR_INVALID_PARAMETER;
+    }
+
+    pthread_mutex_lock(&client->mutex);
+    if (client->raw_handler_count >= ODDSOCKETS_MAX_RAW_HANDLERS) {
+        pthread_mutex_unlock(&client->mutex);
+        handle_error(client, ODDSOCKETS_ERROR_MEMORY_ALLOCATION,
+                     "Maximum number of raw event handlers reached");
+        return ODDSOCKETS_ERROR_MEMORY_ALLOCATION;
+    }
+    oddsockets_raw_handler_t* h = &client->raw_handlers[client->raw_handler_count++];
+    strncpy(h->event, event, sizeof(h->event) - 1);
+    h->event[sizeof(h->event) - 1] = '\0';
+    h->callback = callback;
+    h->user_data = user_data;
+    pthread_mutex_unlock(&client->mutex);
+
+    log_message(client, ODDSOCKETS_LOG_DEBUG, "Registered listener for event: %s", event);
     return ODDSOCKETS_SUCCESS;
 }
 
