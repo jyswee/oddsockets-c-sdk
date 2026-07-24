@@ -697,6 +697,12 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a href="#enhanced" class="nav-link">
+                            <i class="fas fa-bolt nav-icon"></i>
+                            Enhanced Features
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a href="#performance" class="nav-link">
                             <i class="fas fa-chart-line nav-icon"></i>
                             Performance
@@ -809,8 +815,8 @@
                                 Copy
                             </button>
                         </div>
-                        <pre><code class="language-bash">git clone https://github.com/oddsockets/c-sdk.git
-cd c-sdk
+                        <pre><code class="language-bash">git clone https://github.com/jyswee/oddsockets-c-sdk.git
+cd oddsockets-c-sdk
 mkdir build && cd build
 cmake ..
 make
@@ -1156,6 +1162,56 @@ int main() {
     // Rest of your application
 }</code></pre>
                 </div>
+            </section>
+
+            <section id="enhanced" class="section">
+                <h2 class="section-title">
+                    <i class="fas fa-bolt"></i>
+                    Enhanced Features
+                </h2>
+
+                <p>Enhanced (Slack-like) events layer on top of the core pub/sub. The <strong>send</strong> side is a set of free functions taking the client handle &mdash; each returns <code>ODDSOCKETS_SUCCESS</code> and emits a real worker event over the live socket. The matching <strong>broadcast</strong> arrives on <code>oddsockets_on(client, "&lt;event&gt;", ...)</code> as a JSON payload string. As with all C SDK I/O, pump <code>oddsockets_process_events()</code> to service the event loop.</p>
+
+                <h3>Typing &amp; reactions</h3>
+                <pre><code class="language-c">#include "oddsockets.h"
+#include "enhanced_features.h"
+
+/* Raw event listeners: enhanced broadcasts arrive here as JSON strings. */
+static void on_typing(const char* event, const char* payload, void* user_data) {
+    printf("typing: %s\n", payload);
+}
+static void on_reaction(const char* event, const char* payload, void* user_data) {
+    printf("reaction: %s\n", payload);
+}
+static void on_message(const char* channel, const char* message, void* user_data) {}
+
+oddsockets_config_t config;
+oddsockets_config_init(&amp;config, "YOUR_API_KEY");
+strncpy(config.user_id, "alice", sizeof(config.user_id) - 1);
+oddsockets_client_t* client = oddsockets_create(&amp;config);
+
+/* Join the scoped room so enhanced broadcasts are delivered. */
+oddsockets_channel_t* ch = oddsockets_channel_create(client, "room-42");
+oddsockets_channel_subscribe(ch, on_message, NULL, NULL);
+
+/* Receive-path */
+oddsockets_on(client, "user_typing",    on_typing,   NULL);
+oddsockets_on(client, "reaction_added", on_reaction, NULL);
+
+/* Send-path */
+oddsockets_start_typing(client, "alice", "room-42");
+oddsockets_add_reaction(client, "msg-1", "room-42", ":thumbsup:", "alice", "Alice");
+
+/* Drive the event loop to flush sends and dispatch broadcasts. */
+for (int i = 0; i &lt; 200; i++) { oddsockets_process_events(client); usleep(5000); }</code></pre>
+
+                <h3>Event surface</h3>
+                <ul>
+                    <li><strong>Typing</strong> &mdash; <code>oddsockets_start_typing(client, user_id, channel)</code>, <code>oddsockets_stop_typing(client, user_id, channel)</code> &rarr; broadcast <code>user_typing</code>, <code>user_stopped_typing</code></li>
+                    <li><strong>Reactions</strong> &mdash; <code>oddsockets_add_reaction(client, message_id, channel, emoji, user_id, user_name)</code>, <code>oddsockets_remove_reaction(client, message_id, channel, emoji, user_id)</code> &rarr; broadcast <code>reaction_added</code>, <code>reaction_removed</code></li>
+                </ul>
+
+                <p>The C enhanced surface is deliberately focused on typing and reactions. Any other worker event your channel emits is still available directly on <code>oddsockets_on(client, "&lt;event&gt;", ...)</code>.</p>
             </section>
 
             <section id="performance" class="section">
