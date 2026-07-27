@@ -77,6 +77,8 @@ struct oddsockets_channel {
     void* message_user_data;
     oddsockets_presence_callback_t presence_callback;
     void* presence_user_data;
+    oddsockets_history_callback_t history_callback;
+    void* history_user_data;
 
     /* Options */
     oddsockets_subscribe_options_t subscribe_options;
@@ -277,6 +279,71 @@ static bool os_extract_raw_value(const char* obj, const char* key, char* out, si
     return true;
 }
 
+/* Split a top-level JSON array string ("[a,b,c]") into its element strings,
+   respecting nested objects/arrays and quoted strings. Allocates *out_items and
+   each element with custom_malloc; the caller frees both. Returns the count. */
+static size_t os_split_json_array(const char* arr, const char*** out_items) {
+    *out_items = NULL;
+    const char* p = os_skip_ws(arr);
+    if (*p != '[') return 0;
+    p++;
+
+    const char** items = NULL;
+    size_t count = 0, cap = 0;
+
+    while (*p) {
+        p = os_skip_ws(p);
+        if (*p == ']' || *p == '\0') break;
+
+        const char* start = p;
+        int depth = 0;
+        bool in_str = false;
+        while (*p) {
+            if (in_str) {
+                if (*p == '\\' && *(p + 1)) p++;
+                else if (*p == '"') in_str = false;
+            } else if (*p == '"') {
+                in_str = true;
+            } else if (*p == '{' || *p == '[') {
+                depth++;
+            } else if (*p == '}' || *p == ']') {
+                if (depth == 0) break; /* closing ']' of the array */
+                depth--;
+            } else if (*p == ',' && depth == 0) {
+                break; /* element separator */
+            }
+            p++;
+        }
+
+        /* Trim trailing whitespace off the element. */
+        const char* end = p;
+        while (end > start && (end[-1] == ' ' || end[-1] == '\t' ||
+                               end[-1] == '\r' || end[-1] == '\n')) end--;
+
+        size_t len = (size_t)(end - start);
+        if (len > 0) {
+            if (count == cap) {
+                size_t new_cap = cap ? cap * 2 : 8;
+                const char** grown = custom_realloc(items, new_cap * sizeof(char*));
+                if (!grown) break;
+                items = grown;
+                cap = new_cap;
+            }
+            char* elem = custom_malloc(len + 1);
+            if (!elem) break;
+            memcpy(elem, start, len);
+            elem[len] = '\0';
+            items[count++] = elem;
+        }
+
+        if (*p == ',') p++;
+        else if (*p == ']') break;
+    }
+
+    *out_items = items;
+    return count;
+}
+
 /* Decode a Socket.IO EVENT frame ("42[\"event\",payload]"). Writes the event
    name and points payload_out at the argument object (or NULL if none). */
 static bool parse_socketio_event_frame(char* frame, char* event_out,
@@ -396,6 +463,36 @@ static void dispatch_socketio_event(oddsockets_client_t* client, const char* eve
         char occ[32] = "0";
         os_extract_raw_value(payload, "occupancy", occ, sizeof(occ));
         channel->presence_callback(channel->name, "occupancy", occ, channel->presence_user_data);
+    } else if (strcmp(event, "history") == 0 && channel && channel->history_callback) {
+        /* The worker emits "history" both as the explicit get_history RESPONSE
+           (query:true) and as a fire-and-forget on-join snapshot (~10 msgs, no
+           query flag). Only the query:true response may satisfy a getHistory
+           request; ignore the snapshot so it can't deliver the wrong data.
+           BUG-2026-0727-0012. */
+        if (pj && json_get_bool(pj, "query", false)) {
+            oddsockets_history_callback_t cb = channel->history_callback;
+            void* ud = channel->history_user_data;
+            /* One-shot: clear before invoking so a later snapshot is ignored. */
+            channel->history_callback = NULL;
+            channel->history_user_data = NULL;
+
+            char* arr = custom_malloc(ODDSOCKETS_MAX_MESSAGE_SIZE);
+            if (arr) {
+                const char** items = NULL;
+                size_t count = 0;
+                if (os_extract_raw_value(payload, "messages", arr, ODDSOCKETS_MAX_MESSAGE_SIZE)) {
+                    count = os_split_json_array(arr, &items);
+                }
+                cb(channel->name, items, count, ud);
+                if (items) {
+                    for (size_t i = 0; i < count; i++) custom_free((void*)items[i]);
+                    custom_free(items);
+                }
+                custom_free(arr);
+            } else {
+                cb(channel->name, NULL, 0, ud);
+            }
+        }
     } else if (strcmp(event, "error") == 0) {
         char msg[256] = "worker error";
         os_extract_raw_value(payload, "message", msg, sizeof(msg));
@@ -918,6 +1015,39 @@ int oddsockets_channel_get_presence(oddsockets_channel_t* channel,
     char payload[192];
     snprintf(payload, sizeof(payload), "{\"channel\":\"%s\"}", channel->name);
     return send_socketio_event(channel->client, "get_presence", payload);
+}
+
+int oddsockets_channel_get_history(oddsockets_channel_t* channel,
+                                   oddsockets_history_callback_t callback,
+                                   void* user_data,
+                                   const oddsockets_history_options_t* options) {
+    if (!channel || !callback) {
+        return ODDSOCKETS_ERROR_INVALID_PARAMETER;
+    }
+
+    if (channel->client->state != ODDSOCKETS_STATE_CONNECTED) {
+        return ODDSOCKETS_ERROR_NOT_CONNECTED;
+    }
+
+    /* Register the one-shot waiter, then emit "get_history". The worker replies
+       with a query:true "history" event that dispatch_socketio_event() routes
+       back to this callback (gated on query:true, see BUG-2026-0727-0012). */
+    channel->history_callback = callback;
+    channel->history_user_data = user_data;
+
+    int count = (options && options->count > 0) ? options->count : 50;
+    char payload[512];
+    int n = snprintf(payload, sizeof(payload),
+                     "{\"channel\":\"%s\",\"count\":%d", channel->name, count);
+    if (options && options->start_time) {
+        n += snprintf(payload + n, sizeof(payload) - n, ",\"start\":\"%s\"", options->start_time);
+    }
+    if (options && options->end_time) {
+        n += snprintf(payload + n, sizeof(payload) - n, ",\"end\":\"%s\"", options->end_time);
+    }
+    snprintf(payload + n, sizeof(payload) - n, "}");
+
+    return send_socketio_event(channel->client, "get_history", payload);
 }
 
 bool oddsockets_channel_is_subscribed(oddsockets_channel_t* channel) {
