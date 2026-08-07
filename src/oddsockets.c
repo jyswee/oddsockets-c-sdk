@@ -155,22 +155,31 @@ static void generate_client_identifier(oddsockets_client_t* client) {
 /* Worker Assignment */
 static int get_worker_assignment(oddsockets_client_t* client) {
     char manager_url[ODDSOCKETS_MAX_URL_LENGTH];
-    
-    /* Discover manager URL */
-    int result = manager_discovery_get_url(client->config.api_key, manager_url, sizeof(manager_url));
-    if (result != ODDSOCKETS_SUCCESS) {
-        handle_error(client, result, "Failed to discover manager URL");
-        return result;
+    char discovery_error[ODDSOCKETS_DISCOVERY_MAX_ERROR_LENGTH];
+
+    /* Use the configured manager verbatim; never silently retarget production */
+    int result = manager_discovery_get_url(client->config.manager_url, manager_url,
+                                           sizeof(manager_url),
+                                           discovery_error, sizeof(discovery_error));
+    if (result != ODDSOCKETS_DISCOVERY_SUCCESS) {
+        handle_error(client, ODDSOCKETS_ERROR_INVALID_PARAMETER,
+                     discovery_error[0] ? discovery_error : "Failed to resolve manager URL");
+        return ODDSOCKETS_ERROR_INVALID_PARAMETER;
     }
-    
+
     /* Request worker assignment */
     char request_url[ODDSOCKETS_MAX_URL_LENGTH * 2];
-    snprintf(request_url, sizeof(request_url), 
+    int written = snprintf(request_url, sizeof(request_url),
              "%s/api/cluster/select-worker?apiKey=%s&userId=%s&clientIdentifier=%s",
-             manager_url, client->config.api_key, 
+             manager_url, client->config.api_key,
              client->config.user_id[0] ? client->config.user_id : client->client_identifier,
              client->client_identifier);
-    
+    if (written < 0 || (size_t)written >= sizeof(request_url)) {
+        handle_error(client, ODDSOCKETS_ERROR_INVALID_PARAMETER,
+                     "Worker assignment URL exceeds the request buffer");
+        return ODDSOCKETS_ERROR_INVALID_PARAMETER;
+    }
+
     /* Make HTTP request */
     char response[4096];
     result = http_get(request_url, response, sizeof(response), client->config.connection_timeout_ms);
@@ -588,8 +597,15 @@ void oddsockets_config_init(oddsockets_config_t* config, const char* api_key) {
     memset(config, 0, sizeof(oddsockets_config_t));
     
     strncpy(config->api_key, api_key, sizeof(config->api_key) - 1);
-    strncpy(config->manager_url, ODDSOCKETS_DEFAULT_MANAGER_URL, sizeof(config->manager_url) - 1);
-    
+
+    /* Resolve here so callers can see which manager the client will contact
+       instead of having to infer it from network traffic. */
+    if (oddsockets_get_default_manager_url(config->manager_url,
+                                           sizeof(config->manager_url)) != ODDSOCKETS_DISCOVERY_SUCCESS) {
+        config->manager_url[0] = '\0';
+    }
+
+
     config->auto_connect = true;
     config->reconnect_attempts = ODDSOCKETS_DEFAULT_RECONNECT_ATTEMPTS;
     config->reconnect_delay_ms = ODDSOCKETS_DEFAULT_RECONNECT_DELAY_MS;
