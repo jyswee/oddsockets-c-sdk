@@ -27,6 +27,7 @@ extern "C" {
 
 /* Configuration Constants */
 #define ODDSOCKETS_MAX_API_KEY_LENGTH 256
+#define ODDSOCKETS_MAX_TOKEN_LENGTH 1024
 #define ODDSOCKETS_MAX_USER_ID_LENGTH 128
 #define ODDSOCKETS_MAX_CHANNEL_NAME_LENGTH 128
 #define ODDSOCKETS_MAX_URL_LENGTH 512
@@ -39,6 +40,7 @@ extern "C" {
 #define ODDSOCKETS_DEFAULT_RECONNECT_DELAY_MS 1000
 #define ODDSOCKETS_DEFAULT_CONNECTION_TIMEOUT_MS 10000
 #define ODDSOCKETS_DEFAULT_MESSAGE_TIMEOUT_MS 5000
+#define ODDSOCKETS_DEFAULT_TOKEN_REFRESH_LEAD_MS 120000
 #define ODDSOCKETS_DEFAULT_MANAGER_URL "https://connect.oddsockets.tyga.network"
 
 /* Error Codes */
@@ -112,6 +114,18 @@ typedef void (*oddsockets_log_callback_t)(oddsockets_log_level_t level,
                                          const char* message,
                                          void* user_data);
 
+/* Token provider callback for keyless auth. Mints a fresh short-lived realtime
+   token (your backend verifies the player and calls POST /v1/token on the
+   OddSockets front door). Write the JWT into token_out (NUL-terminated,
+   token_size bytes available) and, if known, the expiry as epoch MILLISECONDS
+   into *expires_at_ms_out (leave 0 to have the SDK read the JWT's exp claim).
+   Return ODDSOCKETS_SUCCESS on success, any other value on failure.
+   Invoked before every (re)connect and again shortly before expiry. */
+typedef int (*oddsockets_token_provider_t)(char* token_out,
+                                           size_t token_size,
+                                           int64_t* expires_at_ms_out,
+                                           void* user_data);
+
 /* Raw Socket.IO event callback. Receives the event name and the event payload
    rendered as a JSON string (may be NULL if the event carried no argument).
    Used to observe enhanced (Slack-like) broadcasts such as "user_typing" and
@@ -122,9 +136,16 @@ typedef void (*oddsockets_event_callback_t)(const char* event,
 
 /* Configuration Structure */
 typedef struct {
-    /* Required */
+    /* Credential: either an API key OR a token_provider (keyless) is required */
     char api_key[ODDSOCKETS_MAX_API_KEY_LENGTH];
-    
+
+    /* Keyless auth: mints a short-lived realtime token, used INSTEAD of the
+       API key. The SDK re-mints before every (re)connect and refreshes
+       token_refresh_lead_ms before expiry (checked in process_events). */
+    oddsockets_token_provider_t token_provider;
+    void* token_provider_user_data;
+    int token_refresh_lead_ms;
+
     /* Optional */
     char user_id[ODDSOCKETS_MAX_USER_ID_LENGTH];
     char manager_url[ODDSOCKETS_MAX_URL_LENGTH];
@@ -382,6 +403,17 @@ const char* oddsockets_get_version(void);
  * @param api_key API key to use
  */
 void oddsockets_config_init(oddsockets_config_t* config, const char* api_key);
+
+/**
+ * Initialize default configuration for keyless (minted-token) auth.
+ * Configures a token_provider INSTEAD of an API key.
+ * @param config Configuration structure to initialize
+ * @param token_provider Callback that mints a fresh short-lived token
+ * @param user_data User data passed to the token provider
+ */
+void oddsockets_config_init_token(oddsockets_config_t* config,
+                                  oddsockets_token_provider_t token_provider,
+                                  void* user_data);
 
 /* Memory Management (for embedded systems) */
 

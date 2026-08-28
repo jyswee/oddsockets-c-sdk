@@ -77,6 +77,59 @@ for (int i = 0; i < 200; i++) { oddsockets_process_events(client); usleep(5000);
 The C enhanced surface is deliberately focused on typing and reactions. Any other worker
 event your channel emits is still available directly on `oddsockets_on(client, "<event>", ...)`.
 
+## Token auth for game clients (token provider)
+
+Ship game clients **without embedding an API key**. Give the config a token provider
+callback instead: your backend verifies the player (its own session/JWT), calls the
+OddSockets `POST /v1/token` mint endpoint with **its** API key server-side, and returns
+the short-lived token. The SDK invokes your callback to fetch a fresh token before every
+connect, and silently re-mints it before expiry while the client stays connected.
+
+```c
+#include "oddsockets.h"
+
+/* Called by the SDK whenever it needs a fresh token (connect + pre-expiry refresh).
+ * Fill token_out with the minted token and return ODDSOCKETS_SUCCESS.
+ * Set *expires_at_ms_out to the expiry in epoch ms, or 0 to let the SDK
+ * read the exp claim straight from the JWT. */
+static int token_provider(char* token_out, size_t token_size,
+                          int64_t* expires_at_ms_out, void* user_data) {
+    /* Ask YOUR backend for an OddSockets token, e.g.
+     * POST https://your-game-backend.example.com/oddsockets/token
+     * (authenticated with the player's own session). */
+    if (fetch_token_from_my_backend(token_out, token_size) != 0) return -1;
+    *expires_at_ms_out = 0; /* SDK reads the JWT exp claim */
+    return ODDSOCKETS_SUCCESS;
+}
+
+static void on_refreshed(const char* event, const char* payload, void* u) {
+    printf("token refreshed: %s\n", payload); /* {"expiresAt":<epoch ms>} */
+}
+
+oddsockets_config_t config;
+oddsockets_config_init_token(&config, token_provider, NULL); /* no API key */
+strncpy(config.user_id, "player-1", sizeof(config.user_id) - 1);
+
+oddsockets_client_t* client = oddsockets_create(&config);
+oddsockets_on(client, "token_refreshed", on_refreshed, NULL);
+oddsockets_connect(client);
+
+/* Pump as usual — refresh checks run inside oddsockets_process_events(). */
+while (running) { oddsockets_process_events(client); usleep(5000); }
+```
+
+Notes:
+
+- Either an API key **or** a token provider is required — `oddsockets_create` returns
+  `NULL` if the config has neither.
+- The provider is called for a **fresh** token on every connect and reconnect, and again
+  `config.token_refresh_lead_ms` (default 120000) before the current token expires. On a
+  failed refresh the SDK emits `token_refresh_failed` and keeps the current connection.
+- Expiry resolution: your `*expires_at_ms_out` if non-zero, otherwise the JWT `exp`
+  claim decoded from the token itself.
+- Refresh runs on the normal single-threaded pump — no extra threads; just keep calling
+  `oddsockets_process_events()`.
+
 ## Get a Free API Key
 
 ```bash
