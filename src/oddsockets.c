@@ -39,6 +39,8 @@ struct oddsockets_client {
 
     /* Connection Management */
     websocket_client_t* websocket;
+    char current_token[ODDSOCKETS_MAX_TOKEN_LENGTH];
+    int64_t token_expires_at_ms;
     char worker_url[ODDSOCKETS_MAX_URL_LENGTH];
     char worker_id[64];
     char session_id[128];
@@ -139,10 +141,12 @@ static void set_state(oddsockets_client_t* client, oddsockets_state_t new_state)
 
 /* Client Identifier Generation */
 static void generate_client_identifier(oddsockets_client_t* client) {
-    /* Create a hash of the API key for session stickiness */
+    /* Create a hash of the API key for session stickiness (keyless clients
+       hash a fixed seed instead). */
     uint32_t hash = 0;
-    const char* api_key = client->config.api_key;
-    
+    const char* api_key = client->config.api_key[0] ? client->config.api_key
+                                                    : "token-client";
+
     for (int i = 0; api_key[i]; i++) {
         hash = ((hash << 5) - hash) + api_key[i];
     }
@@ -150,6 +154,118 @@ static void generate_client_identifier(oddsockets_client_t* client) {
     const char* user_id = client->config.user_id[0] ? client->config.user_id : "default";
     snprintf(client->client_identifier, sizeof(client->client_identifier), 
              "%x_%s", hash, user_id);
+}
+
+/* ---- Keyless (minted-token) auth helpers ---- */
+
+/* Defined further down (framing helpers / event dispatch). */
+static bool os_extract_raw_value(const char* obj, const char* key, char* out, size_t out_size);
+static void dispatch_socketio_event(oddsockets_client_t* client, const char* event,
+                                    const char* payload);
+
+static bool is_token_mode(const oddsockets_client_t* client) {
+    return client->config.token_provider != NULL;
+}
+
+static int64_t os_now_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (int64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
+
+/* Decode a base64url segment into out (NUL-terminated). Returns false when the
+   input does not fit or contains invalid characters. */
+static bool os_base64url_decode(const char* in, size_t in_len, char* out, size_t out_size) {
+    static const char* alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    size_t oi = 0;
+    uint32_t acc = 0;
+    int bits = 0;
+    for (size_t i = 0; i < in_len; i++) {
+        char c = in[i];
+        if (c == '=') break;
+        const char* p = strchr(alphabet, c);
+        if (!p) return false;
+        acc = (acc << 6) | (uint32_t)(p - alphabet);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            if (oi >= out_size - 1) return false;
+            out[oi++] = (char)((acc >> bits) & 0xFF);
+        }
+    }
+    out[oi] = '\0';
+    return true;
+}
+
+/* Best-effort expiry (epoch ms) from the JWT payload's exp claim; 0 if the
+   token cannot be decoded. */
+static int64_t expiry_from_jwt(const char* token) {
+    const char* dot1 = strchr(token, '.');
+    if (!dot1) return 0;
+    const char* dot2 = strchr(dot1 + 1, '.');
+    size_t seg_len = dot2 ? (size_t)(dot2 - dot1 - 1) : strlen(dot1 + 1);
+
+    char payload[2048];
+    if (!os_base64url_decode(dot1 + 1, seg_len, payload, sizeof(payload))) return 0;
+
+    char exp_str[32];
+    if (!os_extract_raw_value(payload, "exp", exp_str, sizeof(exp_str))) return 0;
+    long long exp = atoll(exp_str);
+    return exp > 0 ? (int64_t)exp * 1000 : 0;
+}
+
+/* Ask the app's token provider for a fresh short-lived token. */
+static int resolve_token(oddsockets_client_t* client) {
+    char token[ODDSOCKETS_MAX_TOKEN_LENGTH];
+    int64_t expires_at_ms = 0;
+    token[0] = '\0';
+
+    int result = client->config.token_provider(token, sizeof(token), &expires_at_ms,
+                                               client->config.token_provider_user_data);
+    if (result != ODDSOCKETS_SUCCESS || !token[0]) {
+        handle_error(client, ODDSOCKETS_ERROR_INVALID_API_KEY,
+                     "token_provider failed to mint a token");
+        return ODDSOCKETS_ERROR_INVALID_API_KEY;
+    }
+
+    if (expires_at_ms <= 0) {
+        expires_at_ms = expiry_from_jwt(token);
+    }
+
+    pthread_mutex_lock(&client->mutex);
+    strncpy(client->current_token, token, sizeof(client->current_token) - 1);
+    client->current_token[sizeof(client->current_token) - 1] = '\0';
+    client->token_expires_at_ms = expires_at_ms;
+    pthread_mutex_unlock(&client->mutex);
+
+    log_message(client, ODDSOCKETS_LOG_INFO, "Realtime token resolved (expires at %lld ms)",
+                (long long)expires_at_ms);
+    return ODDSOCKETS_SUCCESS;
+}
+
+/* Silent pre-expiry refresh, driven from oddsockets_process_events(): when the
+   token is inside the refresh lead window, re-mint it so the next reconnect
+   handshake carries a live credential. Dispatches "token_refreshed" /
+   "token_refresh_failed" to oddsockets_on() listeners. */
+static void maybe_refresh_token(oddsockets_client_t* client) {
+    if (!is_token_mode(client) || client->token_expires_at_ms <= 0) return;
+
+    int lead = client->config.token_refresh_lead_ms > 0
+                   ? client->config.token_refresh_lead_ms
+                   : ODDSOCKETS_DEFAULT_TOKEN_REFRESH_LEAD_MS;
+    if (os_now_ms() < client->token_expires_at_ms - lead) return;
+
+    if (resolve_token(client) == ODDSOCKETS_SUCCESS) {
+        char payload[64];
+        snprintf(payload, sizeof(payload), "{\"expiresAt\":%lld}",
+                 (long long)client->token_expires_at_ms);
+        dispatch_socketio_event(client, "token_refreshed", payload);
+    } else {
+        /* Stop retrying every tick; the next (re)connect re-resolves anyway. */
+        client->token_expires_at_ms = 0;
+        dispatch_socketio_event(client, "token_refresh_failed", NULL);
+    }
 }
 
 /* Worker Assignment */
@@ -167,13 +283,23 @@ static int get_worker_assignment(oddsockets_client_t* client) {
         return ODDSOCKETS_ERROR_INVALID_PARAMETER;
     }
 
-    /* Request worker assignment */
-    char request_url[ODDSOCKETS_MAX_URL_LENGTH * 2];
-    int written = snprintf(request_url, sizeof(request_url),
+    /* Request worker assignment. In token mode the minted token IS the
+       credential (JWT base64url characters are URL-safe as-is). */
+    char request_url[ODDSOCKETS_MAX_URL_LENGTH * 2 + ODDSOCKETS_MAX_TOKEN_LENGTH];
+    int written;
+    if (is_token_mode(client)) {
+        written = snprintf(request_url, sizeof(request_url),
+             "%s/api/cluster/select-worker?token=%s&userId=%s&clientIdentifier=%s",
+             manager_url, client->current_token,
+             client->config.user_id[0] ? client->config.user_id : client->client_identifier,
+             client->client_identifier);
+    } else {
+        written = snprintf(request_url, sizeof(request_url),
              "%s/api/cluster/select-worker?apiKey=%s&userId=%s&clientIdentifier=%s",
              manager_url, client->config.api_key,
              client->config.user_id[0] ? client->config.user_id : client->client_identifier,
              client->client_identifier);
+    }
     if (written < 0 || (size_t)written >= sizeof(request_url)) {
         handle_error(client, ODDSOCKETS_ERROR_INVALID_PARAMETER,
                      "Worker assignment URL exceeds the request buffer");
@@ -383,11 +509,18 @@ static bool parse_socketio_event_frame(char* frame, char* event_out,
 /* Send a Socket.IO CONNECT packet carrying auth (lands in handshake.auth,
    where the worker's io.use() middleware reads socket.handshake.auth.apiKey). */
 static void send_socketio_connect(oddsockets_client_t* client) {
-    char frame[ODDSOCKETS_MAX_API_KEY_LENGTH + ODDSOCKETS_MAX_USER_ID_LENGTH + 64];
-    snprintf(frame, sizeof(frame),
-             "40{\"apiKey\":\"%s\",\"userId\":\"%s\"}",
-             client->config.api_key,
-             client->config.user_id[0] ? client->config.user_id : client->client_identifier);
+    char frame[ODDSOCKETS_MAX_TOKEN_LENGTH + ODDSOCKETS_MAX_USER_ID_LENGTH + 64];
+    if (is_token_mode(client)) {
+        snprintf(frame, sizeof(frame),
+                 "40{\"token\":\"%s\",\"userId\":\"%s\"}",
+                 client->current_token,
+                 client->config.user_id[0] ? client->config.user_id : client->client_identifier);
+    } else {
+        snprintf(frame, sizeof(frame),
+                 "40{\"apiKey\":\"%s\",\"userId\":\"%s\"}",
+                 client->config.api_key,
+                 client->config.user_id[0] ? client->config.user_id : client->client_identifier);
+    }
     websocket_client_send(client->websocket, frame);
 }
 
@@ -611,13 +744,26 @@ void oddsockets_config_init(oddsockets_config_t* config, const char* api_key) {
     config->reconnect_delay_ms = ODDSOCKETS_DEFAULT_RECONNECT_DELAY_MS;
     config->connection_timeout_ms = ODDSOCKETS_DEFAULT_CONNECTION_TIMEOUT_MS;
     config->message_timeout_ms = ODDSOCKETS_DEFAULT_MESSAGE_TIMEOUT_MS;
+    config->token_refresh_lead_ms = ODDSOCKETS_DEFAULT_TOKEN_REFRESH_LEAD_MS;
     config->enable_ssl = true;
     config->ssl_verify_peer = true;
     config->log_level = ODDSOCKETS_LOG_INFO;
 }
 
+void oddsockets_config_init_token(oddsockets_config_t* config,
+                                  oddsockets_token_provider_t token_provider,
+                                  void* user_data) {
+    if (!config || !token_provider) return;
+
+    /* Keyless: same defaults, token_provider INSTEAD of an API key. */
+    oddsockets_config_init(config, "");
+    config->token_provider = token_provider;
+    config->token_provider_user_data = user_data;
+}
+
 oddsockets_client_t* oddsockets_create(const oddsockets_config_t* config) {
-    if (!config || !config->api_key[0]) {
+    /* Either an API key or a token_provider (keyless) is required. */
+    if (!config || (!config->api_key[0] && !config->token_provider)) {
         return NULL;
     }
     
@@ -664,7 +810,17 @@ int oddsockets_connect(oddsockets_client_t* client) {
     }
     
     set_state(client, ODDSOCKETS_STATE_CONNECTING);
-    
+
+    /* Step 0: in token mode, mint a FRESH short-lived token before every
+       (re)connect - it authenticates both worker selection and the handshake. */
+    if (is_token_mode(client)) {
+        int token_result = resolve_token(client);
+        if (token_result != ODDSOCKETS_SUCCESS) {
+            set_state(client, ODDSOCKETS_STATE_ERROR);
+            return token_result;
+        }
+    }
+
     /* Get worker assignment */
     int result = get_worker_assignment(client);
     if (result != ODDSOCKETS_SUCCESS) {
@@ -689,7 +845,8 @@ int oddsockets_connect(oddsockets_client_t* client) {
     /* Auth travels in the Socket.IO handshake (send_socketio_connect), not an
        HTTP header, but keep the header populated for transports that use it. */
     snprintf(ws_config.auth_header, sizeof(ws_config.auth_header),
-             "Authorization: Bearer %s", client->config.api_key);
+             "Authorization: Bearer %s",
+             is_token_mode(client) ? client->current_token : client->config.api_key);
     
     client->websocket = websocket_client_create(&ws_config);
     if (!client->websocket) {
@@ -754,10 +911,14 @@ int oddsockets_process_events(oddsockets_client_t* client) {
         return ODDSOCKETS_ERROR_INVALID_PARAMETER;
     }
     
+    /* Keyless auth: silently re-mint the token when inside the refresh
+       lead window, so reconnects always carry a live credential. */
+    maybe_refresh_token(client);
+
     if (client->websocket) {
         return websocket_client_process_events(client->websocket);
     }
-    
+
     return ODDSOCKETS_SUCCESS;
 }
 
