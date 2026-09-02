@@ -129,7 +129,11 @@ typedef int (*oddsockets_token_provider_t)(char* token_out,
 /* Raw Socket.IO event callback. Receives the event name and the event payload
    rendered as a JSON string (may be NULL if the event carried no argument).
    Used to observe enhanced (Slack-like) broadcasts such as "user_typing" and
-   "reaction_added" on the live connection. */
+   "reaction_added" on the live connection, as well as the challenge /
+   leaderboard / achievement broadcasts: "challenge_progress",
+   "leaderboard_rank_change", "challenge_complete", "achievement_unlock",
+   "achievement_progress", "challenge_invited", "challenge_reply_received" and
+   "challenge_invite_cancelled". Register for any of them with oddsockets_on(). */
 typedef void (*oddsockets_event_callback_t)(const char* event,
                                             const char* payload_json,
                                             void* user_data);
