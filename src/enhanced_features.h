@@ -276,6 +276,84 @@ int oddsockets_search_by_user(oddsockets_client_t* client,
                               oddsockets_error_callback on_error,
                               void* user_data);
 
+/* Challenge / Leaderboard / Achievement Events (10 methods)
+ *
+ * These mirror the fire-and-forget enhanced emitters above: each takes a raw
+ * JSON payload string (as documented per-function) that is emitted verbatim to
+ * the worker over the live connection. The worker persists the request and
+ * broadcasts the resulting events to the scoped room. Where a request has a
+ * response, the worker replies with a "<event>_success" event on success and an
+ * error event keyed by the request event name on failure; observe both (and the
+ * unsolicited broadcasts listed at the top of oddsockets.h) via oddsockets_on().
+ *
+ * The payload_json argument must be a complete JSON object literal, e.g.
+ *   "{\"challengeId\":\"c1\",\"metric\":\"score\",\"ranked\":true}".
+ * Pass NULL or "{}" where the operation takes no fields.
+ */
+
+/* Create a challenge / leaderboard.
+ * payload: {challengeId, metric, ranked?, channel?, resultWebhookUrl?, standingsUrl?}
+ * emits "challenge_create"; ack "challenge_create_success"; error event "challenge_create". */
+int oddsockets_create_challenge(oddsockets_client_t* client,
+                                const char* payload_json);
+
+/* Report progress toward a challenge metric (fire-and-forget).
+ * payload: {challengeId, value, metric?, eventId?, cohort?, platform?, channel?}
+ * emits "challenge_progress"; no acknowledgement. */
+int oddsockets_report_progress(oddsockets_client_t* client,
+                               const char* payload_json);
+
+/* Complete (or otherwise finalise) a challenge for the caller.
+ * payload: {challengeId, outcome, eventId?, reward?}
+ *   outcome one of: completed | failed | expired | conceded | tied
+ * emits "challenge_complete"; ack "challenge_complete_success"; error event "challenge_complete". */
+int oddsockets_complete_challenge(oddsockets_client_t* client,
+                                  const char* payload_json);
+
+/* Unlock (or advance) an achievement (fire-and-forget).
+ * payload: {achievementId, name?, tier?, percentComplete?, challengeId?, channel?}
+ *   percentComplete < 100 broadcasts "achievement_progress";
+ *   percentComplete >= 100 (or omitted) broadcasts "achievement_unlock".
+ * emits "achievement_unlock"; no acknowledgement. */
+int oddsockets_unlock_achievement(oddsockets_client_t* client,
+                                  const char* payload_json);
+
+/* Query the current standings/leaderboard for a challenge.
+ * payload: {challengeId, limit?=20, offset?=0}
+ * emits "challenge_standings"; ack "challenge_standings_success"; error event "challenge_standings". */
+int oddsockets_get_standings(oddsockets_client_t* client,
+                             const char* payload_json);
+
+/* Query the caller's achievement state.
+ * payload: {achievementId?}  (omit achievementId to return all)
+ * emits "achievement_query"; ack "achievement_state"; error event "achievement_query". */
+int oddsockets_get_achievements(oddsockets_client_t* client,
+                                const char* payload_json);
+
+/* Send a directed challenge invite to another user.
+ * payload: {toUserId, type?='match', payload?<=8KB, ttl?=300, channel?, inviteId?}
+ * emits "challenge_invite"; ack "challenge_invite_success"; error event "challenge_invite". */
+int oddsockets_send_challenge_invite(oddsockets_client_t* client,
+                                     const char* payload_json);
+
+/* Reply to a received challenge invite.
+ * payload: {inviteId, accept, reason?}
+ * emits "challenge_reply"; ack "challenge_reply_success"; error event "challenge_reply". */
+int oddsockets_reply_challenge_invite(oddsockets_client_t* client,
+                                      const char* payload_json);
+
+/* Cancel a challenge invite the caller previously sent.
+ * payload: {inviteId}
+ * emits "challenge_invite_cancel"; ack "challenge_invite_cancel_success"; error event "challenge_invite_cancel". */
+int oddsockets_cancel_challenge_invite(oddsockets_client_t* client,
+                                       const char* payload_json);
+
+/* List the caller's pending challenge invites (takes no fields).
+ * payload: {} (pass NULL or "{}")
+ * emits "challenge_invites_query"; ack "challenge_invites"; error event "challenge_invites_query". */
+int oddsockets_get_challenge_invites(oddsockets_client_t* client,
+                                     const char* payload_json);
+
 #ifdef __cplusplus
 }
 #endif

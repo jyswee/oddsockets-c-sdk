@@ -1,0 +1,26 @@
+# Two-client CHALLENGE regression. Build from repo ROOT:
+#   docker build -f demo/Dockerfile.challenge -t oddsockets-c-challenge .
+#   docker run --rm -e ODDSOCKETS_API_KEY=ak_... -e ODDSOCKETS_MANAGER_URL=https://... oddsockets-c-challenge
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      gcc libc6-dev libwebsockets-dev libcurl4-openssl-dev libssl-dev \
+      pkg-config ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /sdk
+COPY . /sdk
+
+RUN gcc -O2 -Wall -I src \
+      demo/challenge_regression.c \
+      src/oddsockets.c \
+      src/enhanced_features.c \
+      src/websocket_client.c \
+      src/http_client.c \
+      src/json_parser.c \
+      src/manager_discovery.c \
+      -o /usr/local/bin/oddsockets-challenge \
+      $(pkg-config --cflags --libs libwebsockets) \
+      -lcurl -lssl -lcrypto -lpthread
+
+CMD ["oddsockets-challenge"]

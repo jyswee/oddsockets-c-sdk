@@ -557,9 +557,13 @@ static void dispatch_socketio_event(oddsockets_client_t* client, const char* eve
                                     const char* payload) {
     /* Fan the event out to any raw listeners registered via oddsockets_on()
        first - this is the receive path for enhanced (Slack-like) broadcasts
-       such as "user_typing" and "reaction_added". Snapshot the matching
-       handlers under the lock, then invoke them unlocked so a callback can
-       safely re-enter the client. */
+       such as "user_typing" and "reaction_added", plus the challenge /
+       leaderboard / achievement broadcasts "challenge_progress",
+       "leaderboard_rank_change", "challenge_complete", "achievement_unlock",
+       "achievement_progress", "challenge_invited", "challenge_reply_received"
+       and "challenge_invite_cancelled". Snapshot the matching handlers under
+       the lock, then invoke them unlocked so a callback can safely re-enter the
+       client. */
     oddsockets_raw_handler_t matched[ODDSOCKETS_MAX_RAW_HANDLERS];
     int matched_count = 0;
     pthread_mutex_lock(&client->mutex);
