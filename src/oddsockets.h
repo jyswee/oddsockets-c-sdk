@@ -207,6 +207,33 @@ typedef struct {
     char session_id[128];
 } oddsockets_worker_info_t;
 
+/* Usage / analytics statistics for the calling API key's owner scope.
+ *
+ * Each tile is genuinely optional: the manager returns JSON null for a tile it
+ * cannot compute yet, which is NOT the same as a real zero. The has_* flags
+ * preserve that distinction - only read mau/dau/total_messages/error_rate when
+ * the matching has_* flag is true. When has_* is false the numeric field is
+ * left 0 but MUST be treated as "unknown / not available", never as a count.
+ * String fields are NUL-terminated and may be empty if the manager omitted them.
+ */
+typedef struct {
+    bool has_mau;
+    long mau;
+
+    bool has_dau;
+    long dau;
+
+    bool has_total_messages;
+    long total_messages;
+
+    bool has_error_rate;
+    double error_rate;
+
+    char owner_scope[128];
+    char detail[256];
+    char timestamp[64];
+} oddsockets_usage_stats_t;
+
 /* Client Management Functions */
 
 /**
@@ -243,8 +270,35 @@ oddsockets_state_t oddsockets_get_state(oddsockets_client_t* client);
  * @param worker_info Output structure for worker information
  * @return ODDSOCKETS_SUCCESS on success, error code on failure
  */
-int oddsockets_get_worker_info(oddsockets_client_t* client, 
+int oddsockets_get_worker_info(oddsockets_client_t* client,
                               oddsockets_worker_info_t* worker_info);
+
+/**
+ * Fetch usage / analytics statistics for the API key's owner scope.
+ *
+ * REQUIRES an API key: keyless (token_provider) clients have no owner scope to
+ * query and this returns ODDSOCKETS_ERROR_INVALID_PARAMETER without making a
+ * request. Discovers the manager the same way worker selection does, then does
+ * an HTTP GET {managerUrl}/api/tenant/usage with an "X-API-Key" header.
+ *
+ * On success allocates an oddsockets_usage_stats_t and writes its address to
+ * *out; the caller MUST free it with oddsockets_usage_stats_free(). *out is set
+ * to NULL on any error. Tiles that the manager reported as null are preserved as
+ * has_*=false (see oddsockets_usage_stats_t) - never coerced to zero.
+ *
+ * @param client Client instance (must be API-key mode)
+ * @param out    Receives a heap-allocated stats struct (freed by the caller)
+ * @return ODDSOCKETS_SUCCESS on success, error code on failure
+ */
+int oddsockets_get_usage_stats(oddsockets_client_t* client,
+                               oddsockets_usage_stats_t** out);
+
+/**
+ * Free a stats struct returned by oddsockets_get_usage_stats().
+ * Safe to call with NULL.
+ * @param stats Stats struct to free
+ */
+void oddsockets_usage_stats_free(oddsockets_usage_stats_t* stats);
 
 /**
  * Process pending events (call regularly in main loop)

@@ -910,6 +910,116 @@ int oddsockets_get_worker_info(oddsockets_client_t* client, oddsockets_worker_in
     return ODDSOCKETS_SUCCESS;
 }
 
+/* A usage tile is genuinely absent when the key is missing OR the manager sent
+   JSON null (which this parser stores as the literal string "null"). Only then
+   is it honest to leave has_*=false; a real numeric string is a real value. */
+static bool usage_tile_present(const char* raw) {
+    return raw != NULL && strcmp(raw, "null") != 0 && raw[0] != '\0';
+}
+
+int oddsockets_get_usage_stats(oddsockets_client_t* client,
+                               oddsockets_usage_stats_t** out) {
+    if (out) *out = NULL;
+    if (!client || !out) {
+        return ODDSOCKETS_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Keyless/token clients have no owner scope to query. Mirror the JS SDK's
+       guard exactly (message text is contract). */
+    if (is_token_mode(client) || !client->config.api_key[0]) {
+        handle_error(client, ODDSOCKETS_ERROR_INVALID_PARAMETER,
+                     "getUsageStats requires an apiKey (keyless/token clients have no owner scope to query)");
+        return ODDSOCKETS_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Discover the manager exactly as worker selection does. */
+    char manager_url[ODDSOCKETS_MAX_URL_LENGTH];
+    char discovery_error[ODDSOCKETS_DISCOVERY_MAX_ERROR_LENGTH];
+    int result = manager_discovery_get_url(client->config.manager_url, manager_url,
+                                           sizeof(manager_url),
+                                           discovery_error, sizeof(discovery_error));
+    if (result != ODDSOCKETS_DISCOVERY_SUCCESS) {
+        handle_error(client, ODDSOCKETS_ERROR_INVALID_PARAMETER,
+                     discovery_error[0] ? discovery_error : "Failed to resolve manager URL");
+        return ODDSOCKETS_ERROR_INVALID_PARAMETER;
+    }
+
+    char request_url[ODDSOCKETS_MAX_URL_LENGTH + 32];
+    int written = snprintf(request_url, sizeof(request_url),
+                           "%s/api/tenant/usage", manager_url);
+    if (written < 0 || (size_t)written >= sizeof(request_url)) {
+        handle_error(client, ODDSOCKETS_ERROR_INVALID_PARAMETER,
+                     "Usage stats URL exceeds the request buffer");
+        return ODDSOCKETS_ERROR_INVALID_PARAMETER;
+    }
+
+    /* GET {managerUrl}/api/tenant/usage with the X-API-Key header, reusing the
+       same libcurl transport as worker selection. */
+    char response[4096];
+    result = http_get_with_api_key(request_url, client->config.api_key,
+                                   response, sizeof(response),
+                                   client->config.connection_timeout_ms);
+    if (result != ODDSOCKETS_SUCCESS) {
+        handle_error(client, ODDSOCKETS_ERROR_HTTP_ERROR, "Failed to fetch usage stats");
+        return ODDSOCKETS_ERROR_HTTP_ERROR;
+    }
+
+    json_object_t* json = json_parse(response);
+    if (!json) {
+        handle_error(client, ODDSOCKETS_ERROR_JSON_PARSE_ERROR, "Failed to parse usage stats response");
+        return ODDSOCKETS_ERROR_JSON_PARSE_ERROR;
+    }
+
+    oddsockets_usage_stats_t* stats = custom_malloc(sizeof(oddsockets_usage_stats_t));
+    if (!stats) {
+        json_free(json);
+        handle_error(client, ODDSOCKETS_ERROR_MEMORY_ALLOCATION, "Failed to allocate usage stats");
+        return ODDSOCKETS_ERROR_MEMORY_ALLOCATION;
+    }
+    memset(stats, 0, sizeof(*stats));
+
+    /* Tiles live under "tiles" (dot-notation in this parser). PRESERVE nulls:
+       a missing or null tile stays has_*=false, never coerced to 0. Integer
+       tiles parse via strtol, errorRate (a float) via strtod. */
+    const char* raw;
+
+    raw = json_get_string(json, "tiles.mau");
+    if (usage_tile_present(raw)) { stats->has_mau = true; stats->mau = strtol(raw, NULL, 10); }
+
+    raw = json_get_string(json, "tiles.dau");
+    if (usage_tile_present(raw)) { stats->has_dau = true; stats->dau = strtol(raw, NULL, 10); }
+
+    raw = json_get_string(json, "tiles.totalMessages");
+    if (usage_tile_present(raw)) { stats->has_total_messages = true; stats->total_messages = strtol(raw, NULL, 10); }
+
+    raw = json_get_string(json, "tiles.errorRate");
+    if (usage_tile_present(raw)) { stats->has_error_rate = true; stats->error_rate = strtod(raw, NULL); }
+
+    const char* owner_scope = json_get_string(json, "ownerScope");
+    if (owner_scope && strcmp(owner_scope, "null") != 0) {
+        strncpy(stats->owner_scope, owner_scope, sizeof(stats->owner_scope) - 1);
+    }
+    const char* detail = json_get_string(json, "detail");
+    if (detail && strcmp(detail, "null") != 0) {
+        strncpy(stats->detail, detail, sizeof(stats->detail) - 1);
+    }
+    const char* timestamp = json_get_string(json, "timestamp");
+    if (timestamp && strcmp(timestamp, "null") != 0) {
+        strncpy(stats->timestamp, timestamp, sizeof(stats->timestamp) - 1);
+    }
+
+    json_free(json);
+
+    *out = stats;
+    log_message(client, ODDSOCKETS_LOG_INFO, "Fetched usage stats for owner scope: %s",
+                stats->owner_scope[0] ? stats->owner_scope : "(unknown)");
+    return ODDSOCKETS_SUCCESS;
+}
+
+void oddsockets_usage_stats_free(oddsockets_usage_stats_t* stats) {
+    if (stats) custom_free(stats);
+}
+
 int oddsockets_process_events(oddsockets_client_t* client) {
     if (!client) {
         return ODDSOCKETS_ERROR_INVALID_PARAMETER;

@@ -6,6 +6,7 @@
 #include <curl/curl.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 typedef struct {
     char* data;
@@ -44,6 +45,39 @@ int http_get(const char* url, char* response, size_t response_size, int timeout_
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
     CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+
+    return (res == CURLE_OK) ? 0 : -1;
+}
+
+int http_get_with_api_key(const char* url, const char* api_key,
+                          char* response, size_t response_size, int timeout_ms) {
+    if (!url || !api_key || !response || response_size == 0) return -1;
+
+    CURL* curl = curl_easy_init();
+    if (!curl) return -1;
+
+    response_buffer_t buf = { .data = response, .size = 0, .capacity = response_size };
+    response[0] = '\0';
+
+    /* "X-API-Key: " + key, matching the manager's key-scoped auth header.
+       Sized generously; API keys are well under 256 bytes. */
+    char header_line[512];
+    snprintf(header_line, sizeof(header_line), "X-API-Key: %s", api_key);
+
+    struct curl_slist* headers = NULL;
+    headers = curl_slist_append(headers, header_line);
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, (long)timeout_ms);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "OddSockets-C-SDK/1.0.0");
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
     return (res == CURLE_OK) ? 0 : -1;
