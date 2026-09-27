@@ -101,7 +101,7 @@ static void pump(oddsockets_client_t* a, oddsockets_client_t* b) {
 int main(void) {
     const char* api_key = getenv("ODDSOCKETS_API_KEY");
     if (!api_key || !api_key[0]) {
-        fprintf(stderr, "Missing ODDSOCKETS_API_KEY. Get a free key (see README), then:\n");
+        fprintf(stderr, "Missing ODDSOCKETS_API_KEY. Get an API key (see README), then:\n");
         fprintf(stderr, "  export ODDSOCKETS_API_KEY=\"ak_...\"\n");
         return 1;
     }
