@@ -341,7 +341,7 @@ static int get_worker_assignment(oddsockets_client_t* client) {
     
     json_free(json);
     
-    log_message(client, ODDSOCKETS_LOG_INFO, "Assigned to worker: %s (%s)", worker_id, worker_url);
+    log_message(client, ODDSOCKETS_LOG_INFO, "Connection endpoint assigned: %s", worker_url);
     return ODDSOCKETS_SUCCESS;
 }
 

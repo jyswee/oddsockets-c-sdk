@@ -135,8 +135,6 @@ int main(void) {
     wa.worker_id[0] = wb.worker_id[0] = '\0';
     oddsockets_get_worker_info(alice, &wa);
     oddsockets_get_worker_info(bob, &wb);
-    printf("[alice] worker %s\n", wa.worker_id[0] ? wa.worker_id : "(unknown)");
-    printf("[bob]   worker %s\n", wb.worker_id[0] ? wb.worker_id : "(unknown)");
 
     /* Both subscribe to 'lobby' so both join the scoped room. */
     oddsockets_channel_t* al = oddsockets_channel_create(alice, CH);
@@ -371,8 +369,8 @@ int main(void) {
 
     printf("\n==================== SUMMARY ====================\n");
     printf("PASS=%d  FAIL=%d\n", g_pass, g_fail);
-    printf("worker_alice=%s worker_bob=%s\n",
-           wa.worker_id[0] ? wa.worker_id : "?", wb.worker_id[0] ? wb.worker_id : "?");
+    /* Compare the two assigned instances internally: the RELATION is the proof,
+       the instance identities are not published. */
     printf("cross_worker=%s\n",
            (wa.worker_id[0] && wb.worker_id[0] && strcmp(wa.worker_id, wb.worker_id)) ? "YES" : "no(same-or-unknown)");
     return g_fail ? 2 : 0;

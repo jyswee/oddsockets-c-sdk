@@ -148,11 +148,6 @@ int main(void) {
         return 2;
     }
 
-    oddsockets_worker_info_t wa, wb;
-    if (oddsockets_get_worker_info(alice, &wa) == ODDSOCKETS_SUCCESS)
-        printf("[alice] worker %s\n", wa.worker_id);
-    if (oddsockets_get_worker_info(bob, &wb) == ODDSOCKETS_SUCCESS)
-        printf("[bob]   worker %s\n", wb.worker_id);
     printf("[connect] alice = connected, bob = connected\n");
 
     /* ============================ Scenario 1 ============================ */
